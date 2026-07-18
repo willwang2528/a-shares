@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import costSnapshot from "@/data/cost-snapshot.json";
+import lastRealIndexSnapshot from "@/data/last-real-index-snapshot.json";
 import {
   DEFAULT_SETTINGS,
   estimateStorageMb,
@@ -108,8 +109,12 @@ export function AStockApp() {
   const [page, setPage] = useState<PageId>("home");
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [fixtureId, setFixtureId] = useState("market_drop");
-  const [snapshot, setSnapshot] = useState<MarketSnapshot>(() => getFixture("market_drop"));
-  const [dataMode, setDataMode] = useState<"real" | "demo">("real");
+  const [snapshot, setSnapshot] = useState<MarketSnapshot>(
+    () => lastRealIndexSnapshot as MarketSnapshot,
+  );
+  const [dataMode, setDataMode] = useState<"real" | "cached_real" | "demo">(
+    "cached_real",
+  );
   const [marketLoading, setMarketLoading] = useState(true);
   const [marketError, setMarketError] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<AlertEvent[]>([]);
@@ -127,6 +132,7 @@ export function AStockApp() {
   const [costScope, setCostScope] = useState<"market" | "sector" | "watch">("market");
 
   const currentAlerts = useMemo(() => evaluateRules(snapshot, settings), [snapshot, settings]);
+  const isReal = dataMode !== "demo";
   const risk = highestRisk(currentAlerts);
   const riskInfo = riskCopy(risk);
   const session = getMarketSessionState(new Date());
@@ -161,8 +167,8 @@ export function AStockApp() {
         setMarketError(null);
       })
       .catch(() => {
-        setDataMode("demo");
-        setMarketError("真实指数读取失败，当前保留 Mock 演示且不冒充真实行情。");
+        setDataMode("cached_real");
+        setMarketError("实时刷新失败，当前显示上次成功读取的真实收盘快照，时间见页面标注。");
       })
       .finally(() => setMarketLoading(false));
   }, []);
@@ -235,7 +241,7 @@ export function AStockApp() {
         if (result.payload?.snapshot) setSnapshot(result.payload.snapshot);
         setAlerts(nextAlerts);
         setToast(
-          dataMode === "real"
+          isReal
             ? `真实指数扫描完成；当前覆盖不足，未运行全市场风险规则。`
             : `Mock 扫描完成：发现 ${nextAlerts.length} 条事件。`,
         );
@@ -299,11 +305,11 @@ export function AStockApp() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <Pill tone={dataMode === "real" ? "green" : "amber"}>
-            {dataMode === "real" ? "真实指数·实验" : "Mock 演示"}
+          <Pill tone={isReal ? "green" : "amber"}>
+            {dataMode === "real" ? "真实指数·实验" : dataMode === "cached_real" ? "真实指数·上次成功" : "Mock 演示"}
           </Pill>
           <p>
-            {dataMode === "real"
+            {isReal
               ? "主要指数来自公开行情页面；完整全市场数据仍待正式授权。"
               : "当前数据仅用于测试，不代表真实市场。"}
           </p>
@@ -331,19 +337,19 @@ export function AStockApp() {
                 <div className="hero-kicker">
                   <span className="risk-icon">{riskInfo.icon}</span>
                   <span>
-                    {dataMode === "real" ? "最近交易日真实快照" : "Mock 测试场景"} ·{" "}
+                    {isReal ? "最近交易日真实快照" : "Mock 测试场景"} ·{" "}
                     {snapshot.asOf.slice(0, 16).replace("T", " ")}
                   </span>
                 </div>
                 <h2>
-                  {dataMode === "real"
+                  {isReal
                     ? marketLoading
-                      ? "正在读取真实指数"
+                      ? "正在检查行情更新"
                       : "真实指数已更新"
                     : `盘面${riskInfo.label}`}
                 </h2>
                 <p>
-                  {dataMode === "real"
+                  {isReal
                     ? "当前真实数据覆盖四个主要指数。市场宽度、板块和个股尚未接入正式授权数据，因此不生成完整风险结论。"
                     : `${riskInfo.detail}。当前是 Mock 演示数据，只用于验证规则，不代表真实市场。`}
                 </p>
@@ -352,21 +358,21 @@ export function AStockApp() {
                   <button className="button button-dark" onClick={() => refreshRealMarket()} disabled={marketLoading}>
                     {marketLoading ? "正在更新…" : "刷新真实数据"}
                   </button>
-                  <button className="button button-ghost" onClick={() => go(dataMode === "real" ? "status" : "alerts")}>
-                    {dataMode === "real" ? "查看覆盖说明" : "查看触发依据"}
+                  <button className="button button-ghost" onClick={() => go(isReal ? "status" : "alerts")}>
+                    {isReal ? "查看覆盖说明" : "查看触发依据"}
                   </button>
                 </div>
               </div>
               <div
                 className="breadth-ring"
-                aria-label={dataMode === "real" ? "四个真实主要指数" : `下跌 ${snapshot.breadth.down} 家`}
+                aria-label={isReal ? "四个真实主要指数" : `下跌 ${snapshot.breadth.down} 家`}
               >
                 <strong>
-                  {dataMode === "real"
+                  {isReal
                     ? snapshot.indices.length
                     : `${Math.round((snapshot.breadth.down / (snapshot.breadth.up + snapshot.breadth.down + snapshot.breadth.flat)) * 100)}%`}
                 </strong>
-                <span>{dataMode === "real" ? "真实指数" : "股票下跌"}</span>
+                <span>{isReal ? "真实指数" : "股票下跌"}</span>
               </div>
             </section>
 
@@ -380,7 +386,7 @@ export function AStockApp() {
                 <div><p className="eyebrow">市场整体</p><h2>主要指数</h2></div>
                 <span className="data-time">
                   {snapshot.asOf.slice(0, 16).replace("T", " ")} ·{" "}
-                  {dataMode === "real" ? "真实数据·实验源" : "Mock"}
+                  {dataMode === "real" ? "真实数据·实验源" : dataMode === "cached_real" ? "真实数据·上次成功" : "Mock"}
                 </span>
               </div>
               <div className="index-grid">
@@ -396,7 +402,7 @@ export function AStockApp() {
               </div>
             </section>
 
-            {dataMode === "real" ? (
+            {isReal ? (
               <section className="two-column">
                 <div className="panel coverage-panel">
                   <Pill tone="amber">尚未覆盖</Pill>
@@ -462,7 +468,7 @@ export function AStockApp() {
                 <button className="text-button" onClick={() => go("alerts")}>全部 {currentAlerts.length} 条</button>
               </div>
               <div className="alert-list">
-                {currentAlerts.length ? currentAlerts.slice(0, 3).map((event) => <AlertCard key={event.id} event={event} />) : <Empty title="未运行完整风险判断" detail={dataMode === "real" ? "真实数据当前只覆盖指数；需要全市场、板块和个股授权数据后才能运行完整规则。" : "当前 Mock 场景没有事件达到阈值。"} />}
+                {currentAlerts.length ? currentAlerts.slice(0, 3).map((event) => <AlertCard key={event.id} event={event} />) : <Empty title="未运行完整风险判断" detail={isReal ? "真实数据当前只覆盖指数；需要全市场、板块和个股授权数据后才能运行完整规则。" : "当前 Mock 场景没有事件达到阈值。"} />}
               </div>
             </section>
           </div>
@@ -537,7 +543,7 @@ export function AStockApp() {
 
         {page === "reviews" && (
           <div className="page-stack">
-            <section className="review-hero"><div><Pill tone="green">结构化复盘</Pill><h2>{reviews[0]?.tradeDate ?? "尚未生成"}</h2><p>{reviews[0]?.conclusion}</p></div><button className="button button-dark" onClick={() => run("review")} disabled={running === "review"}>{running === "review" ? "生成中…" : dataMode === "real" ? "用真实指数生成" : "用 Mock 场景生成"}</button></section>
+            <section className="review-hero"><div><Pill tone="green">结构化复盘</Pill><h2>{reviews[0]?.tradeDate ?? "尚未生成"}</h2><p>{reviews[0]?.conclusion}</p></div><button className="button button-dark" onClick={() => run("review")} disabled={running === "review"}>{running === "review" ? "生成中…" : isReal ? "用真实指数生成" : "用 Mock 场景生成"}</button></section>
             {reviews[0] ? <ReviewDocument review={reviews[0]} snapshotProvider={snapshot.provider} /> : <Empty title="还没有复盘" detail="收盘数据就绪后会自动生成，也可以用 Mock 场景手动测试。" />}
           </div>
         )}
