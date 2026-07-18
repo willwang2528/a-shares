@@ -7,18 +7,21 @@ import {
   DEFAULT_SETTINGS,
   estimateStorageMb,
   evaluateRules,
-  generateDeterministicReview,
   getFixture,
   getMarketSessionState,
   highestRisk,
   nextTaskLabel,
   scansPerTradingDay,
   type AlertEvent,
-  type DailyReview,
   type MarketSnapshot,
   type RiskLevel,
   type UserSettings,
 } from "@/lib/domain";
+import type {
+  HistoricalReviewResponse,
+  HistoricalReviewResult,
+  HistoricalStockMovement,
+} from "@/lib/historical-review";
 import type { WatchSearchResult } from "@/lib/instruments";
 import type { StockQuote } from "@/lib/market";
 
@@ -53,17 +56,18 @@ type ApiData = {
   message?: string;
   settings?: UserSettings;
   alerts?: AlertEvent[];
-  reviews?: DailyReview[];
   watches?: WatchItem[];
   services?: HealthItem[];
   snapshot?: MarketSnapshot;
   results?: WatchSearchResult[];
   sourceStatus?: "live" | "fallback" | "featured";
   quotes?: StockQuote[];
+  historical?: HistoricalReviewResult;
+  cacheHit?: boolean;
+  cacheExpiresAt?: string;
   payload?: {
     events?: AlertEvent[];
     snapshot?: MarketSnapshot;
-    review?: DailyReview;
     delivery?: { message?: string };
   };
 };
@@ -95,6 +99,15 @@ function signed(value: number) {
 
 function formatMb(value: number) {
   return value >= 1000 ? `${(value / 1000).toFixed(2)} GB` : `${value.toFixed(1)} MB`;
+}
+
+function shanghaiDate(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 function riskCopy(level: RiskLevel) {
@@ -153,7 +166,6 @@ export function AStockApp() {
   const [marketLoading, setMarketLoading] = useState(true);
   const [marketError, setMarketError] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<AlertEvent[]>([]);
-  const [reviews, setReviews] = useState<DailyReview[]>([]);
   const [health, setHealth] = useState<HealthItem[]>([]);
   const [saveState, setSaveState] = useState("正在连接云端保存…");
   const [running, setRunning] = useState<string | null>(null);
@@ -172,6 +184,13 @@ export function AStockApp() {
   const [alertLevel, setAlertLevel] = useState<"all" | RiskLevel>("all");
   const [costInterval, setCostInterval] = useState(5);
   const [costScope, setCostScope] = useState<"market" | "sector" | "watch">("market");
+  const [historicalDate, setHistoricalDate] = useState(
+    () => (lastRealIndexSnapshot as MarketSnapshot).asOf.slice(0, 10),
+  );
+  const [historicalReview, setHistoricalReview] =
+    useState<HistoricalReviewResponse | null>(null);
+  const [historicalLoading, setHistoricalLoading] = useState(false);
+  const [historicalError, setHistoricalError] = useState<string | null>(null);
 
   const currentAlerts = useMemo(() => evaluateRules(snapshot, settings), [snapshot, settings]);
   const isReal = dataMode !== "demo";
@@ -191,7 +210,6 @@ export function AStockApp() {
       .then(({ ok, data }) => {
         if (data.settings) setSettings(data.settings);
         if (Array.isArray(data.alerts) && data.alerts.length) setAlerts(data.alerts);
-        if (Array.isArray(data.reviews) && data.reviews.length) setReviews(data.reviews);
         if (Array.isArray(data.watches)) setWatchItems(data.watches);
         setSaveState(ok ? "已连接云端保存" : "当前为会话内演示配置");
       })
@@ -302,7 +320,7 @@ export function AStockApp() {
     }
   }
 
-  async function run(type: "scan" | "review" | "test_notification") {
+  async function run(type: "scan" | "test_notification") {
     setRunning(type);
     try {
       const response = await fetch("/api/run", {
@@ -325,10 +343,6 @@ export function AStockApp() {
             ? `真实指数扫描完成；当前覆盖不足，未运行全市场风险规则。`
             : `Mock 扫描完成：发现 ${nextAlerts.length} 条事件。`,
         );
-      } else if (type === "review") {
-        const review = result.payload?.review ?? generateDeterministicReview(snapshot);
-        setReviews((current) => [review, ...current.filter((item) => item.tradeDate !== review.tradeDate)]);
-        setToast("复盘已生成并保存；模型未配置时自动使用数字型版本。");
       } else {
         setToast(result.payload?.delivery?.message ?? "测试通知已写入日志。");
       }
@@ -339,6 +353,40 @@ export function AStockApp() {
       setToast(error instanceof Error ? error.message : "任务失败，请检查系统状态。");
     } finally {
       setRunning(null);
+    }
+  }
+
+  async function loadHistoricalReview() {
+    setHistoricalLoading(true);
+    setHistoricalError(null);
+    setHistoricalReview(null);
+    try {
+      const response = await fetch(
+        `/api/historical-review?date=${encodeURIComponent(historicalDate)}`,
+        { cache: "no-store" },
+      );
+      const data = await readApiData(response);
+      if (
+        !response.ok ||
+        !data.historical ||
+        typeof data.cacheHit !== "boolean" ||
+        !data.cacheExpiresAt
+      ) {
+        throw new Error(data.message ?? "真实历史数据读取失败。");
+      }
+      setHistoricalReview({
+        historical: data.historical,
+        cacheHit: data.cacheHit,
+        cacheExpiresAt: data.cacheExpiresAt,
+      });
+    } catch (error) {
+      setHistoricalError(
+        error instanceof Error
+          ? error.message
+          : "真实历史数据读取失败；没有使用演示数据替代。",
+      );
+    } finally {
+      setHistoricalLoading(false);
     }
   }
 
@@ -636,7 +684,7 @@ export function AStockApp() {
                           </b>
                         ) : (
                           <b className="quote-pending">
-                            {item.object_type === "sector" ? "待正式行情源" : "读取中"}
+                            {item.object_type === "sector" ? "行业分类" : "读取中"}
                           </b>
                         )}
                       </article>
@@ -664,13 +712,13 @@ export function AStockApp() {
         {page === "watch" && (
           <div className="page-stack">
             <section className="intro-card">
-              <div><Pill tone="green">先选择，再确认</Pill><h2>板块和股票都由你选择</h2><p>输入名称、常用说法或 6 位代码，系统返回多个候选并说明匹配原因；不会再把任何输入都猜成“有色金属”。</p></div>
+                <div><Pill tone="green">先选择，再确认</Pill><h2>行业分类和股票都由你选择</h2><p>“有色金属”是把相关上市公司归到一起的行业大类，不是一只股票；输入名称、常用说法或 6 位代码后，系统会返回多个候选供你选择。</p></div>
               <span className="intro-glyph">◎</span>
             </section>
             <section className="panel">
               <form className="watch-search-form" onSubmit={searchWatchCandidates}>
                 <label className="search-field">
-                  <span>搜索股票或板块</span>
+                  <span>搜索股票或行业分类</span>
                   <div>
                     <b aria-hidden="true">⌕</b>
                     <input
@@ -690,7 +738,7 @@ export function AStockApp() {
                 <p>{searchMessage}</p>
               </div>
               {searchResults.length ? (
-                <div className="search-results" aria-label="可选板块和股票">
+                <div className="search-results" aria-label="可选行业分类和股票">
                   {searchResults.map((result) => {
                     const key = `${result.objectType}:${result.code}`;
                     const selected =
@@ -706,7 +754,7 @@ export function AStockApp() {
                           <div className="candidate-title">
                             <strong>{result.name}</strong>
                             <Pill tone={result.objectType === "sector" ? "green" : "amber"}>
-                              {result.objectType === "sector" ? "板块" : "股票"}
+                              {result.objectType === "sector" ? "行业分类" : "股票"}
                             </Pill>
                           </div>
                           <p>{result.code} · {result.classification}</p>
@@ -782,7 +830,7 @@ export function AStockApp() {
               )}
             </section>
             <section>
-              <div className="section-head"><div><p className="eyebrow">当前关注</p><h2>你选择的板块和股票</h2></div><Pill tone="neutral">{watchItems.length} 项</Pill></div>
+              <div className="section-head"><div><p className="eyebrow">当前关注</p><h2>你选择的行业分类和股票</h2></div><Pill tone="neutral">{watchItems.length} 项</Pill></div>
               {watchItems.length ? (
                 <div className="object-grid">
                   {watchItems.map((item) => (
@@ -842,8 +890,69 @@ export function AStockApp() {
 
         {page === "reviews" && (
           <div className="page-stack">
-            <section className="review-hero"><div><Pill tone="green">结构化复盘</Pill><h2>{reviews[0]?.tradeDate ?? "尚未生成"}</h2><p>{reviews[0]?.conclusion}</p></div><button className="button button-dark" onClick={() => run("review")} disabled={running === "review"}>{running === "review" ? "生成中…" : isReal ? "用真实指数生成" : "用 Mock 场景生成"}</button></section>
-            {reviews[0] ? <ReviewDocument review={reviews[0]} snapshotProvider={snapshot.provider} /> : <Empty title="还没有复盘" detail="收盘数据就绪后会自动生成，也可以用 Mock 场景手动测试。" />}
+            <section className="review-hero historical-review-hero">
+              <div>
+                <Pill tone="green">真实股票日线</Pill>
+                <h2>选择一天，查看开盘前后变化</h2>
+                <p>复盘范围是当前关注列表里的股票；“有色金属”等行业分类不参与单股价格计算。</p>
+              </div>
+              <div className="historical-date-controls">
+                <label>
+                  <span>复盘日期</span>
+                  <input
+                    type="date"
+                    value={historicalDate}
+                    max={shanghaiDate()}
+                    onChange={(event) => {
+                      setHistoricalDate(event.target.value);
+                      setHistoricalReview(null);
+                      setHistoricalError(null);
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="button button-dark"
+                  onClick={loadHistoricalReview}
+                  disabled={historicalLoading || !historicalDate}
+                >
+                  {historicalLoading ? "正在读取真实数据…" : "读取这一天"}
+                </button>
+              </div>
+            </section>
+            <section className="history-method panel">
+              <div>
+                <Pill tone="neutral">开盘前基准</Pill>
+                <strong>上一交易日收盘价</strong>
+                <p>用于比较隔夜到 09:30 开盘时发生了多少变化。</p>
+              </div>
+              <span aria-hidden="true">→</span>
+              <div>
+                <Pill tone="neutral">开盘后</Pill>
+                <strong>09:30 开盘价与当日收盘价</strong>
+                <p>公开历史源没有稳定的 09:25 集合竞价和完整分钟轨迹，因此页面不会冒充这些数据。</p>
+              </div>
+            </section>
+            <section className="review-scope">
+              <div className="section-head compact">
+                <div><p className="eyebrow">本次范围</p><h2>当前关注的股票</h2></div>
+                <Pill tone="neutral">{watchItems.filter((item) => item.object_type === "stock").length} 只</Pill>
+              </div>
+              <div className="scope-chips">
+                {watchItems.filter((item) => item.object_type === "stock").map((item) => (
+                  <span key={item.id}>{item.name}<small>{item.code}</small></span>
+                ))}
+              </div>
+            </section>
+            {historicalLoading ? (
+              <Empty title="正在读取真实历史行情" detail="首次读取会访问公开行情页面；同一天、同一组股票再次查询会优先使用云端缓存。" />
+            ) : historicalError ? (
+              <Empty title="没有数据" detail={`${historicalError} 页面没有使用 Mock 数据补位。`} />
+            ) : historicalReview ? (
+              <HistoricalReviewDocument response={historicalReview} />
+            ) : (
+              <Empty title="请选择日期并读取" detail="若这一天不是交易日、股票尚未上市或数据源没有返回记录，页面会明确显示“没有数据”。" />
+            )}
           </div>
         )}
 
@@ -912,10 +1021,10 @@ function WatchObject({
 }) {
   const isStock = item.object_type === "stock";
   return (
-    <article className="object-card">
+    <article className={`object-card ${isStock ? "" : "sector-card"}`}>
       <div className="object-card-top">
         <span className={`object-icon ${isStock ? "stock" : ""}`}>
-          {isStock ? "股" : "板"}
+          {isStock ? "股" : "类"}
         </span>
         <Pill tone={item.tag === "holding" ? "amber" : "neutral"}>
           {item.tag === "holding" ? "持有" : "仅关注"}
@@ -923,10 +1032,16 @@ function WatchObject({
       </div>
       <h3>{item.name}</h3>
       <p>
-        {item.code}
+        {isStock ? item.code : `申万一级行业 · ${item.code}`}
         {item.cost_price ? ` · 手填成本价 ${item.cost_price}` : ""}
       </p>
-      {quote ? (
+      {!isStock ? (
+        <div className="sector-explainer">
+          <Pill tone="green">行业分类</Pill>
+          <strong>不是单只股票</strong>
+          <small>它代表一组相关上市公司，用于汇总观察；没有一个可以直接展示的单一股价。</small>
+        </div>
+      ) : quote ? (
         <div className="object-quote">
           <strong>¥{quote.value.toFixed(2)}</strong>
           <b className={quote.changePct >= 0 ? "up" : "down"}>
@@ -936,12 +1051,8 @@ function WatchObject({
         </div>
       ) : (
         <div className="object-quote pending">
-          <strong>{isStock ? "真实行情读取中" : "行业行情待正式源"}</strong>
-          <small>
-            {isStock
-              ? "读取失败时不会显示演示价格"
-              : "当前只保存你的板块选择，不猜测涨跌幅"}
-          </small>
+          <strong>真实行情读取中</strong>
+          <small>读取失败时不会显示演示价格</small>
         </div>
       )}
       <div className="object-actions">
@@ -960,8 +1071,146 @@ function AlertCard({ event, expanded = false }: { event: AlertEvent; expanded?: 
   return <article className={`alert-card alert-${event.level}`}><div className="alert-marker"><span>{event.level === "danger" ? "▲" : event.level === "warning" ? "◆" : "●"}</span></div><div className="alert-main"><div className="alert-title"><div><Pill tone={event.objectType === "market" ? "amber" : event.objectType === "stock" ? "green" : "neutral"}>{event.objectType === "market" ? "市场" : event.objectType === "sector" ? "板块" : event.objectType === "system" ? "系统" : "个股"}</Pill><h3>{event.title}</h3></div><time>{event.dataTime.slice(11, 16)}</time></div><p>{event.reason}</p>{expanded && <dl className="evidence-grid"><div><dt>当前值</dt><dd>{event.currentValue}</dd></div><div><dt>触发阈值</dt><dd>{event.threshold}</dd></div><div><dt>数据来源</dt><dd>{event.provider}</dd></div><div><dt>风险等级</dt><dd>{event.level === "danger" ? "高风险" : event.level === "warning" ? "需留意" : "一般"}</dd></div></dl>}</div></article>;
 }
 
-function ReviewDocument({ review, snapshotProvider }: { review: DailyReview; snapshotProvider: string }) {
-  return <article className="review-document"><header><span>每日盘面复盘</span><b>{review.tradeDate}</b><small>生成于 {review.generatedAt.slice(11, 16)} · {review.modelStatus === "not_used" ? "确定性数字版" : "模型辅助版"}</small></header><section><p className="eyebrow">一句话结论</p><h2>{review.conclusion}</h2></section><section className="review-columns"><div><p className="eyebrow">已确认事实</p><ul>{review.facts.map((item) => <li key={item}>{item}</li>)}</ul></div><div><p className="eyebrow">可能解释</p><ul>{review.possibleExplanations.map((item) => <li key={item}>{item}</li>)}</ul></div><div><p className="eyebrow">暂无可验证原因</p><ul>{review.unknowns.map((item) => <li key={item}>{item}</li>)}</ul></div></section><section><p className="eyebrow">下一交易日继续观察</p><ol>{review.nextWatch.map((item) => <li key={item}>{item}</li>)}</ol></section><footer><p>{review.integrity}</p><p>页面数据源：{snapshotProvider}。本工具提供行情信息和风险提醒，不构成证券投资咨询或买卖建议。</p></footer></article>;
+type AvailableHistoricalMovement = HistoricalStockMovement & {
+  status: "available";
+  tradeDate: string;
+  previousTradeDate: string;
+  previousClose: number;
+  open: number;
+  close: number;
+  high: number;
+  low: number;
+  volume: number;
+  openGapPct: number;
+  intradayPct: number;
+  dayChangePct: number;
+};
+
+function isAvailableMovement(
+  item: HistoricalStockMovement,
+): item is AvailableHistoricalMovement {
+  return (
+    item.status === "available" &&
+    typeof item.previousClose === "number" &&
+    typeof item.open === "number" &&
+    typeof item.close === "number" &&
+    typeof item.high === "number" &&
+    typeof item.low === "number" &&
+    typeof item.volume === "number" &&
+    typeof item.openGapPct === "number" &&
+    typeof item.intradayPct === "number" &&
+    typeof item.dayChangePct === "number" &&
+    typeof item.tradeDate === "string" &&
+    typeof item.previousTradeDate === "string"
+  );
+}
+
+function HistoricalReviewDocument({
+  response,
+}: {
+  response: HistoricalReviewResponse;
+}) {
+  const { historical } = response;
+  const available = historical.items.filter(isAvailableMovement);
+  const up = available.filter((item) => item.dayChangePct > 0.005).length;
+  const down = available.filter((item) => item.dayChangePct < -0.005).length;
+  const flat = available.length - up - down;
+  const average = available.length
+    ? available.reduce((sum, item) => sum + item.dayChangePct, 0) /
+      available.length
+    : 0;
+
+  return (
+    <article className="review-document historical-document">
+      <header>
+        <span>关注股票历史复盘</span>
+        <b>{historical.tradeDate}</b>
+        <small>
+          {response.cacheHit ? "已使用云端缓存" : "刚刚读取真实源"} ·{" "}
+          {historical.priceAdjustment}
+        </small>
+      </header>
+      <section className="historical-headline">
+        <div>
+          <p className="eyebrow">一句话数据结论</p>
+          <h2>{historical.summary.headline}</h2>
+        </div>
+        <div className="history-metrics">
+          <span><small>有数据</small><strong>{available.length}/{historical.requestedStockCount}</strong></span>
+          <span><small>上涨 / 下跌</small><strong>{up} / {down}</strong></span>
+          <span><small>基本持平</small><strong>{flat}</strong></span>
+          <span><small>样本平均</small><strong className={average >= 0 ? "up" : "down"}>{signed(average)}</strong></span>
+        </div>
+      </section>
+      <section>
+        <div className="section-head compact">
+          <div><p className="eyebrow">逐只真实数据</p><h2>上一收盘 → 开盘 → 收盘</h2></div>
+          <Pill tone={historical.status === "complete" ? "green" : "amber"}>
+            {historical.status === "complete" ? "数据完整" : historical.status === "partial" ? "部分有数据" : "没有数据"}
+          </Pill>
+        </div>
+        <div className="history-stock-grid">
+          {historical.items.map((item) =>
+            isAvailableMovement(item) ? (
+              <HistoricalStockCard key={item.code} item={item} />
+            ) : (
+              <article className="history-stock-card no-data-card" key={item.code}>
+                <div className="history-stock-title">
+                  <div><strong>{item.name}</strong><small>{item.code}</small></div>
+                  <Pill tone="neutral">没有数据</Pill>
+                </div>
+                <p>{item.message ?? "数据源没有返回可验证的真实记录。"}</p>
+              </article>
+            ),
+          )}
+        </div>
+      </section>
+      <section className="history-review-sections">
+        <div><p className="eyebrow">已确认事实</p><ul>{historical.summary.facts.map((item) => <li key={item}>{item}</li>)}</ul></div>
+        <div><p className="eyebrow">数据提示 · 非操作建议</p><ul>{historical.summary.observations.map((item) => <li key={item}>{item}</li>)}</ul></div>
+        <div><p className="eyebrow">暂无可验证原因</p><ul>{historical.summary.unknowns.map((item) => <li key={item}>{item}</li>)}</ul></div>
+        <div><p className="eyebrow">之后继续观察</p><ol>{historical.summary.nextChecks.map((item) => <li key={item}>{item}</li>)}</ol></div>
+      </section>
+      <footer>
+        <p>读取时间：{historical.fetchedAt.slice(0, 19).replace("T", " ")} UTC；缓存有效至 {response.cacheExpiresAt.slice(0, 19).replace("T", " ")} UTC。</p>
+        <p>数据源：<a href={historical.sourceUrl} target="_blank" rel="noreferrer">{historical.provider} ↗</a>。本页只呈现价格事实和温和提示，不构成证券投资咨询或买卖建议。</p>
+      </footer>
+    </article>
+  );
+}
+
+function HistoricalStockCard({ item }: { item: AvailableHistoricalMovement }) {
+  return (
+    <article className="history-stock-card">
+      <div className="history-stock-title">
+        <div><strong>{item.name}</strong><small>{item.code}</small></div>
+        <b className={item.dayChangePct >= 0 ? "up" : "down"}>{signed(item.dayChangePct)}</b>
+      </div>
+      <div className="price-flow">
+        <span>
+          <small>{item.previousTradeDate}<br />上一收盘</small>
+          <strong>¥{item.previousClose.toFixed(2)}</strong>
+        </span>
+        <i aria-hidden="true">→</i>
+        <span>
+          <small>09:30<br />开盘</small>
+          <strong>¥{item.open.toFixed(2)}</strong>
+          <em className={item.openGapPct >= 0 ? "up" : "down"}>{signed(item.openGapPct)}</em>
+        </span>
+        <i aria-hidden="true">→</i>
+        <span>
+          <small>15:00<br />收盘</small>
+          <strong>¥{item.close.toFixed(2)}</strong>
+          <em className={item.intradayPct >= 0 ? "up" : "down"}>{signed(item.intradayPct)}</em>
+        </span>
+      </div>
+      <dl className="history-range">
+        <div><dt>最高</dt><dd>¥{item.high.toFixed(2)}</dd></div>
+        <div><dt>最低</dt><dd>¥{item.low.toFixed(2)}</dd></div>
+        <div><dt>成交量</dt><dd>{Math.round(item.volume).toLocaleString("zh-CN")}</dd></div>
+      </dl>
+    </article>
+  );
 }
 
 function ChannelCard({ id, title, badge, description, selected, onSelect, action }: { id: string; title: string; badge: string; description: string; selected: boolean; onSelect: () => void; action: React.ReactNode }) {

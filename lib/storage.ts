@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, type AlertEvent, type DailyReview, type UserSettings } from "./domain";
+import type { HistoricalReviewResult } from "./historical-review";
 
 export type StoredWatchItem = {
   id: string;
@@ -11,6 +12,11 @@ export type StoredWatchItem = {
   cost_price: number | null;
   created_at: string;
   updated_at: string;
+};
+
+type StoredHistoricalReviewCache = {
+  payload_json: string;
+  expires_at: string;
 };
 
 export async function ensureSchema(db: D1Database) {
@@ -83,6 +89,13 @@ export async function ensureSchema(db: D1Database) {
       status TEXT NOT NULL, data_ready INTEGER NOT NULL, retry_count INTEGER NOT NULL,
       report_json TEXT NOT NULL, pushed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       UNIQUE(user_id, trade_date)
+    )`,
+    `CREATE TABLE IF NOT EXISTS historical_review_cache (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, trade_date TEXT NOT NULL,
+      scope_key TEXT NOT NULL, provider TEXT NOT NULL, status TEXT NOT NULL,
+      payload_json TEXT NOT NULL, fetched_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      UNIQUE(user_id, trade_date, scope_key)
     )`,
     `CREATE TABLE IF NOT EXISTS provider_health (
       provider_type TEXT NOT NULL, provider_name TEXT NOT NULL, status TEXT NOT NULL,
@@ -259,6 +272,70 @@ export async function deleteWatchItem(
     .bind(id, userId)
     .run();
   return (result.meta.changes ?? 0) > 0;
+}
+
+export async function getHistoricalReviewCache(
+  db: D1Database,
+  userId: string,
+  tradeDate: string,
+  scopeKey: string,
+  now = new Date(),
+) {
+  const row = await db
+    .prepare(
+      `SELECT payload_json, expires_at
+       FROM historical_review_cache
+       WHERE user_id = ? AND trade_date = ? AND scope_key = ? AND expires_at > ?`,
+    )
+    .bind(userId, tradeDate, scopeKey, now.toISOString())
+    .first<StoredHistoricalReviewCache>();
+  if (!row) return null;
+  try {
+    return {
+      historical: JSON.parse(row.payload_json) as HistoricalReviewResult,
+      expiresAt: row.expires_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveHistoricalReviewCache(
+  db: D1Database,
+  userId: string,
+  scopeKey: string,
+  historical: HistoricalReviewResult,
+  expiresAt: string,
+) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO historical_review_cache
+        (id, user_id, trade_date, scope_key, provider, status, payload_json,
+         fetched_at, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, trade_date, scope_key) DO UPDATE SET
+         provider = excluded.provider,
+         status = excluded.status,
+         payload_json = excluded.payload_json,
+         fetched_at = excluded.fetched_at,
+         expires_at = excluded.expires_at,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      userId,
+      historical.tradeDate,
+      scopeKey,
+      historical.provider,
+      historical.status,
+      JSON.stringify(historical),
+      historical.fetchedAt,
+      expiresAt,
+      now,
+      now,
+    )
+    .run();
 }
 
 export async function acquireLease(db: D1Database, leaseKey: string, owner: string, seconds = 45) {

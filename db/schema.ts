@@ -155,6 +155,29 @@ export const dailyReviews = sqliteTable("daily_reviews", {
   ...audit,
 }, (table) => [uniqueIndex("daily_reviews_user_trade_date").on(table.userId, table.tradeDate)]);
 
+export const historicalReviewCache = sqliteTable(
+  "historical_review_cache",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    tradeDate: text("trade_date").notNull(),
+    scopeKey: text("scope_key").notNull(),
+    provider: text("provider").notNull(),
+    status: text("status").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    fetchedAt: text("fetched_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    ...audit,
+  },
+  (table) => [
+    uniqueIndex("historical_review_cache_user_date_scope").on(
+      table.userId,
+      table.tradeDate,
+      table.scopeKey,
+    ),
+  ],
+);
+
 export const providerHealth = sqliteTable("provider_health", {
   providerType: text("provider_type").notNull(),
   providerName: text("provider_name").notNull(),
