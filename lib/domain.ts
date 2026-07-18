@@ -62,8 +62,11 @@ export interface StockQuote {
 
 export interface MarketSnapshot {
   fixtureId: string;
+  dataMode?: "mock" | "experimental_real";
+  coverage?: "full" | "indices_only";
   asOf: string;
   provider: string;
+  sourceUrl?: string;
   delayedMinutes: number;
   dataComplete: boolean;
   indices: IndexQuote[];
@@ -354,6 +357,8 @@ export function evaluateRules(
     ];
   }
 
+  if (snapshot.coverage === "indices_only") return [];
+
   const events: AlertEvent[] = [];
   const listed = snapshot.breadth.up + snapshot.breadth.down + snapshot.breadth.flat;
   const downRatio = listed === 0 ? 0 : (snapshot.breadth.down / listed) * 100;
@@ -538,6 +543,32 @@ export function shouldPush(mode: PushMode, events: AlertEvent[]) {
 }
 
 export function generateDeterministicReview(snapshot: MarketSnapshot): DailyReview {
+  if (snapshot.coverage === "indices_only") {
+    const averageChange =
+      snapshot.indices.reduce((total, index) => total + index.changePct, 0) /
+      snapshot.indices.length;
+    return {
+      tradeDate: snapshot.asOf.slice(0, 10),
+      generatedAt: snapshot.asOf,
+      conclusion: `四个主要指数平均${averageChange >= 0 ? "上涨" : "下跌"} ${Math.abs(averageChange).toFixed(2)}%；当前真实数据仅覆盖指数，不能据此判断全市场风险。`,
+      facts: snapshot.indices.map(
+        (index) =>
+          `${index.name} ${index.value.toFixed(2)}，${index.changePct >= 0 ? "+" : ""}${index.changePct.toFixed(2)}%。`,
+      ),
+      possibleExplanations: [
+        "价格数据只能确认指数涨跌，不能单独证明政策、资金或新闻是变化原因。",
+      ],
+      unknowns: [
+        "尚未接入有正式授权的全市场、板块、个股、涨跌停和已验证新闻数据。",
+      ],
+      nextWatch: [
+        "下一交易日四个主要指数是否继续同向变化。",
+        "接入正式全市场数据后再观察上涨、下跌和涨跌停数量。",
+      ],
+      integrity: `四个主要指数数据完整；来源 ${snapshot.provider}；数据时间 ${snapshot.asOf}；不包含市场宽度、板块和个股。`,
+      modelStatus: "not_used",
+    };
+  }
   const events = evaluateRules(snapshot);
   const risk = highestRisk(events);
   const leadIndex = snapshot.indices[0];
@@ -578,6 +609,8 @@ export function generateDeterministicReview(snapshot: MarketSnapshot): DailyRevi
 
 const NORMAL_SNAPSHOT: MarketSnapshot = {
   fixtureId: "normal",
+  dataMode: "mock",
+  coverage: "full",
   asOf: "2026-07-17T14:30:00+08:00",
   provider: "Mock Fixture（未接入真实行情）",
   delayedMinutes: 0,

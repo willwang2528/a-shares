@@ -1,19 +1,39 @@
 import { env } from "cloudflare:workers";
+import { fetchExperimentalRealSnapshot } from "@/lib/market";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const runtime = env as unknown as Record<string, string | undefined>;
+  let marketService = {
+    id: "market",
+    name: "行情源",
+    status: "configured_unverified",
+    message: "已配置服务端凭据，尚未在本次部署做付费连通测试",
+  };
+  if (!runtime.TUSHARE_TOKEN) {
+    try {
+      const snapshot = await fetchExperimentalRealSnapshot();
+      marketService = {
+        id: "market",
+        name: "行情源",
+        status: "experimental",
+        message: `真实主要指数读取成功，数据时间 ${snapshot.asOf.slice(0, 16).replace("T", " ")}；实验源无正式生产 SLA`,
+      };
+    } catch {
+      marketService = {
+        id: "market",
+        name: "行情源",
+        status: "failed",
+        message: "真实指数读取失败；系统不会自动改成未标注的 Mock 数据",
+      };
+    }
+  }
   return Response.json(
     {
       checkedAt: new Date().toISOString(),
       services: [
-        {
-          id: "market",
-          name: "行情源",
-          status: runtime.TUSHARE_TOKEN ? "configured_unverified" : "mock",
-          message: runtime.TUSHARE_TOKEN ? "已配置服务端凭据，尚未在本次部署做付费连通测试" : "使用 Mock Fixture，不产生行情费用",
-        },
+        marketService,
         {
           id: "scheduler",
           name: "调度心跳",

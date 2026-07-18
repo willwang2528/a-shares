@@ -371,6 +371,35 @@ main {
   max-width: 590px;
 }
 
+.source-warning {
+  background: rgba(255, 255, 255, 0.58);
+  border-left: 3px solid #c97822;
+  border-radius: 8px;
+  color: #7b4a18 !important;
+  margin-top: -8px;
+  padding: 9px 12px;
+}
+
+.coverage-panel {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: center;
+  min-height: 190px;
+}
+
+.coverage-panel h2 {
+  font-size: 23px;
+  margin: 5px 0 0;
+}
+
+.coverage-panel p {
+  color: var(--muted);
+  line-height: 1.75;
+  margin: 0;
+}
+
 .hero-actions,
 .inline-actions {
   align-items: center;

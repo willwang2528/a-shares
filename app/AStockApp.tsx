@@ -14,6 +14,7 @@ import {
   scansPerTradingDay,
   type AlertEvent,
   type DailyReview,
+  type MarketSnapshot,
   type RiskLevel,
   type UserSettings,
 } from "@/lib/domain";
@@ -107,8 +108,12 @@ export function AStockApp() {
   const [page, setPage] = useState<PageId>("home");
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [fixtureId, setFixtureId] = useState("market_drop");
-  const [alerts, setAlerts] = useState<AlertEvent[]>(() => evaluateRules(getFixture("market_drop")));
-  const [reviews, setReviews] = useState<DailyReview[]>(() => [generateDeterministicReview(getFixture("market_drop"))]);
+  const [snapshot, setSnapshot] = useState<MarketSnapshot>(() => getFixture("market_drop"));
+  const [dataMode, setDataMode] = useState<"real" | "demo">("real");
+  const [marketLoading, setMarketLoading] = useState(true);
+  const [marketError, setMarketError] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<AlertEvent[]>([]);
+  const [reviews, setReviews] = useState<DailyReview[]>([]);
   const [health, setHealth] = useState<HealthItem[]>([]);
   const [saveState, setSaveState] = useState("正在连接云端保存…");
   const [running, setRunning] = useState<string | null>(null);
@@ -121,7 +126,6 @@ export function AStockApp() {
   const [costInterval, setCostInterval] = useState(5);
   const [costScope, setCostScope] = useState<"market" | "sector" | "watch">("market");
 
-  const snapshot = useMemo(() => getFixture(fixtureId), [fixtureId]);
   const currentAlerts = useMemo(() => evaluateRules(snapshot, settings), [snapshot, settings]);
   const risk = highestRisk(currentAlerts);
   const riskInfo = riskCopy(risk);
@@ -147,7 +151,40 @@ export function AStockApp() {
       .then((response) => response.json())
       .then((data) => setHealth(data.services ?? []))
       .catch(() => setHealth([]));
+    fetch("/api/market", { cache: "no-store" })
+      .then(async (response) => ({ ok: response.ok, data: await response.json() }))
+      .then(({ ok, data }) => {
+        if (!ok || !data.snapshot) throw new Error(data.message);
+        setSnapshot(data.snapshot);
+        setDataMode("real");
+        setAlerts(evaluateRules(data.snapshot));
+        setMarketError(null);
+      })
+      .catch(() => {
+        setDataMode("demo");
+        setMarketError("真实指数读取失败，当前保留 Mock 演示且不冒充真实行情。");
+      })
+      .finally(() => setMarketLoading(false));
   }, []);
+
+  async function refreshRealMarket() {
+    setMarketLoading(true);
+    try {
+      const response = await fetch("/api/market", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !data.snapshot) throw new Error(data.message);
+      setSnapshot(data.snapshot);
+      setDataMode("real");
+      setAlerts(evaluateRules(data.snapshot, settings));
+      setMarketError(null);
+      setToast(`真实指数已更新：${data.snapshot.asOf.slice(0, 16).replace("T", " ")}`);
+    } catch (error) {
+      setMarketError(error instanceof Error ? error.message : "真实指数读取失败。");
+      setToast("真实指数读取失败；页面不会用 Mock 冒充真实行情。");
+    } finally {
+      setMarketLoading(false);
+    }
+  }
 
   function go(next: PageId) {
     setPage(next);
@@ -185,14 +222,23 @@ export function AStockApp() {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, fixtureId, force: true }),
+        body: JSON.stringify({
+          type,
+          fixtureId: dataMode === "demo" ? fixtureId : undefined,
+          force: true,
+        }),
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.message);
       if (type === "scan") {
         const nextAlerts = result.payload?.events ?? currentAlerts;
+        if (result.payload?.snapshot) setSnapshot(result.payload.snapshot);
         setAlerts(nextAlerts);
-        setToast(`扫描完成：发现 ${nextAlerts.length} 条事件，已合并为一批结果。`);
+        setToast(
+          dataMode === "real"
+            ? `真实指数扫描完成；当前覆盖不足，未运行全市场风险规则。`
+            : `Mock 扫描完成：发现 ${nextAlerts.length} 条事件。`,
+        );
       } else if (type === "review") {
         const review = result.payload?.review ?? generateDeterministicReview(snapshot);
         setReviews((current) => [review, ...current.filter((item) => item.tradeDate !== review.tradeDate)]);
@@ -253,8 +299,14 @@ export function AStockApp() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <Pill tone="amber">演示行情</Pill>
-          <p>真实行情和外部通知尚未开通，不产生费用。</p>
+          <Pill tone={dataMode === "real" ? "green" : "amber"}>
+            {dataMode === "real" ? "真实指数·实验" : "Mock 演示"}
+          </Pill>
+          <p>
+            {dataMode === "real"
+              ? "主要指数来自公开行情页面；完整全市场数据仍待正式授权。"
+              : "当前数据仅用于测试，不代表真实市场。"}
+          </p>
         </div>
       </aside>
 
@@ -278,20 +330,43 @@ export function AStockApp() {
               <div className="hero-copy">
                 <div className="hero-kicker">
                   <span className="risk-icon">{riskInfo.icon}</span>
-                  <span>最近一个交易日 · {snapshot.asOf.slice(11, 16)} Mock 快照</span>
+                  <span>
+                    {dataMode === "real" ? "最近交易日真实快照" : "Mock 测试场景"} ·{" "}
+                    {snapshot.asOf.slice(0, 16).replace("T", " ")}
+                  </span>
                 </div>
-                <h2>盘面{riskInfo.label}</h2>
-                <p>{riskInfo.detail}。当前是演示数据，只用于验证规则，不代表真实市场。</p>
+                <h2>
+                  {dataMode === "real"
+                    ? marketLoading
+                      ? "正在读取真实指数"
+                      : "真实指数已更新"
+                    : `盘面${riskInfo.label}`}
+                </h2>
+                <p>
+                  {dataMode === "real"
+                    ? "当前真实数据覆盖四个主要指数。市场宽度、板块和个股尚未接入正式授权数据，因此不生成完整风险结论。"
+                    : `${riskInfo.detail}。当前是 Mock 演示数据，只用于验证规则，不代表真实市场。`}
+                </p>
+                {marketError ? <p className="source-warning">{marketError}</p> : null}
                 <div className="hero-actions">
-                  <button className="button button-dark" onClick={() => go("alerts")}>查看触发依据</button>
-                  <button className="button button-ghost" onClick={() => run("scan")} disabled={running === "scan"}>
-                    {running === "scan" ? "扫描中…" : "用此场景跑一次"}
+                  <button className="button button-dark" onClick={() => refreshRealMarket()} disabled={marketLoading}>
+                    {marketLoading ? "正在更新…" : "刷新真实数据"}
+                  </button>
+                  <button className="button button-ghost" onClick={() => go(dataMode === "real" ? "status" : "alerts")}>
+                    {dataMode === "real" ? "查看覆盖说明" : "查看触发依据"}
                   </button>
                 </div>
               </div>
-              <div className="breadth-ring" aria-label={`下跌 ${snapshot.breadth.down} 家`}>
-                <strong>{Math.round((snapshot.breadth.down / (snapshot.breadth.up + snapshot.breadth.down + snapshot.breadth.flat)) * 100)}%</strong>
-                <span>股票下跌</span>
+              <div
+                className="breadth-ring"
+                aria-label={dataMode === "real" ? "四个真实主要指数" : `下跌 ${snapshot.breadth.down} 家`}
+              >
+                <strong>
+                  {dataMode === "real"
+                    ? snapshot.indices.length
+                    : `${Math.round((snapshot.breadth.down / (snapshot.breadth.up + snapshot.breadth.down + snapshot.breadth.flat)) * 100)}%`}
+                </strong>
+                <span>{dataMode === "real" ? "真实指数" : "股票下跌"}</span>
               </div>
             </section>
 
@@ -303,7 +378,10 @@ export function AStockApp() {
             <section>
               <div className="section-head">
                 <div><p className="eyebrow">市场整体</p><h2>主要指数</h2></div>
-                <span className="data-time">数据 {snapshot.asOf.slice(11, 16)} · Mock</span>
+                <span className="data-time">
+                  {snapshot.asOf.slice(0, 16).replace("T", " ")} ·{" "}
+                  {dataMode === "real" ? "真实数据·实验源" : "Mock"}
+                </span>
               </div>
               <div className="index-grid">
                 {snapshot.indices.map((index) => (
@@ -318,6 +396,20 @@ export function AStockApp() {
               </div>
             </section>
 
+            {dataMode === "real" ? (
+              <section className="two-column">
+                <div className="panel coverage-panel">
+                  <Pill tone="amber">尚未覆盖</Pill>
+                  <h2>市场宽度与涨跌停</h2>
+                  <p>公开指数快照不包含全市场上涨、下跌、涨停和跌停家数。正式数据接入前，这里不显示 Mock 数字，也不触发相关规则。</p>
+                </div>
+                <div className="panel coverage-panel">
+                  <Pill tone="amber">尚未覆盖</Pill>
+                  <h2>板块与自选股</h2>
+                  <p>板块成分、个股行情和数据源当日涨跌停价仍需正式授权。当前关注对象会保留，但不会混入演示价格。</p>
+                </div>
+              </section>
+            ) : (
             <section className="two-column">
               <div>
                 <div className="section-head compact">
@@ -362,6 +454,7 @@ export function AStockApp() {
                 </div>
               </div>
             </section>
+            )}
 
             <section>
               <div className="section-head">
@@ -369,7 +462,7 @@ export function AStockApp() {
                 <button className="text-button" onClick={() => go("alerts")}>全部 {currentAlerts.length} 条</button>
               </div>
               <div className="alert-list">
-                {currentAlerts.slice(0, 3).map((event) => <AlertCard key={event.id} event={event} />)}
+                {currentAlerts.length ? currentAlerts.slice(0, 3).map((event) => <AlertCard key={event.id} event={event} />) : <Empty title="未运行完整风险判断" detail={dataMode === "real" ? "真实数据当前只覆盖指数；需要全市场、板块和个股授权数据后才能运行完整规则。" : "当前 Mock 场景没有事件达到阈值。"} />}
               </div>
             </section>
           </div>
@@ -435,7 +528,7 @@ export function AStockApp() {
           <div className="page-stack">
             <section className="toolbar">
               <div className="filter-tabs">{(["all", "danger", "warning", "notice"] as const).map((level) => <button key={level} className={alertLevel === level ? "active" : ""} onClick={() => setAlertLevel(level)}>{level === "all" ? "全部" : level === "danger" ? "高风险" : level === "warning" ? "需留意" : "一般"}</button>)}</div>
-              <label className="scenario-select"><span>测试场景</span><select value={fixtureId} onChange={(event) => { setFixtureId(event.target.value); setAlerts(evaluateRules(getFixture(event.target.value), settings)); }}><option value="market_drop">普通交易日大跌</option><option value="limit_wave">跌停封住 / 打开</option><option value="normal">无异常交易日</option><option value="provider_failure">行情源故障</option></select></label>
+              <label className="scenario-select"><span>Mock 测试场景</span><select value={fixtureId} onChange={(event) => { const next = getFixture(event.target.value); setFixtureId(event.target.value); setSnapshot(next); setDataMode("demo"); setAlerts(evaluateRules(next, settings)); }}><option value="market_drop">普通交易日大跌</option><option value="limit_wave">跌停封住 / 打开</option><option value="normal">无异常交易日</option><option value="provider_failure">行情源故障</option></select></label>
             </section>
             <section className="summary-strip"><div><strong>{visibleAlerts.length}</strong><span>条符合筛选</span></div><div><strong>{visibleAlerts.filter((event) => event.level === "danger").length}</strong><span>条高风险</span></div><div><strong>1</strong><span>批合并结果</span></div><button className="button button-dark" onClick={() => run("scan")} disabled={running === "scan"}>{running === "scan" ? "正在扫描…" : "运行一次扫描"}</button></section>
             <section className="alert-list">{visibleAlerts.length ? visibleAlerts.map((event) => <AlertCard key={event.id} event={event} expanded />) : <Empty title="当前筛选没有预警" detail="这不代表没有市场风险，只表示没有事件达到当前规则阈值。" />}</section>
@@ -444,7 +537,7 @@ export function AStockApp() {
 
         {page === "reviews" && (
           <div className="page-stack">
-            <section className="review-hero"><div><Pill tone="green">结构化复盘</Pill><h2>{reviews[0]?.tradeDate ?? "尚未生成"}</h2><p>{reviews[0]?.conclusion}</p></div><button className="button button-dark" onClick={() => run("review")} disabled={running === "review"}>{running === "review" ? "生成中…" : "用当前场景重新生成"}</button></section>
+            <section className="review-hero"><div><Pill tone="green">结构化复盘</Pill><h2>{reviews[0]?.tradeDate ?? "尚未生成"}</h2><p>{reviews[0]?.conclusion}</p></div><button className="button button-dark" onClick={() => run("review")} disabled={running === "review"}>{running === "review" ? "生成中…" : dataMode === "real" ? "用真实指数生成" : "用 Mock 场景生成"}</button></section>
             {reviews[0] ? <ReviewDocument review={reviews[0]} snapshotProvider={snapshot.provider} /> : <Empty title="还没有复盘" detail="收盘数据就绪后会自动生成，也可以用 Mock 场景手动测试。" />}
           </div>
         )}
@@ -473,7 +566,7 @@ export function AStockApp() {
 
         {page === "status" && (
           <div className="page-stack narrow">
-            <section className="status-hero"><span className="status-orbit"><i /></span><div><Pill tone="green">产品可操作</Pill><h2>Mock 主链路已就绪</h2><p>行情、模型和外部通知仍停在安全的未付费状态；数据库会保存你的设置和演示记录。</p></div></section>
+            <section className="status-hero"><span className="status-orbit"><i /></span><div><Pill tone="green">真实指数已接通</Pill><h2>真实数据优先，Mock 只做测试</h2><p>四个主要指数使用真实公开行情快照；完整市场、板块和个股仍等待正式授权，不会与 Mock 混合。</p></div></section>
             <section className="status-list">{health.length ? health.map((item) => <article key={item.id}><span className={`health-dot health-${item.status}`} /><div><strong>{item.name}</strong><p>{item.message}</p></div><Pill tone={item.status === "healthy" || item.status === "ready" ? "green" : item.status.includes("config") ? "amber" : "neutral"}>{statusLabel(item.status)}</Pill></article>) : <Empty title="正在读取状态" detail="如果长时间没有结果，请刷新页面。" />}</section>
             <section className="panel"><div className="section-head compact"><div><p className="eyebrow">安全边界</p><h2>这个产品不会做什么</h2></div></div><ul className="safety-list"><li><span>01</span>不保存券商账号密码，不接账户，不自动下单。</li><li><span>02</span>密钥只在服务端环境变量，前端包和日志不包含真实 Token。</li><li><span>03</span>数据过期时停止生成正常行情结论，最多提醒一次系统异常。</li><li><span>04</span>不把阈值或复盘包装成买卖指令、收益保证或投资建议。</li></ul></section>
           </div>
@@ -491,7 +584,7 @@ export function AStockApp() {
 }
 
 function statusLabel(status: string) {
-  const labels: Record<string, string> = { healthy: "正常", ready: "已就绪", mock: "Mock", degraded: "已降级", simulation: "模拟", needs_config: "待配置", configured_unverified: "待验证", failed: "异常" };
+  const labels: Record<string, string> = { healthy: "正常", ready: "已就绪", experimental: "真实·实验", mock: "Mock", degraded: "已降级", simulation: "模拟", needs_config: "待配置", configured_unverified: "待验证", failed: "异常" };
   return labels[status] ?? status;
 }
 

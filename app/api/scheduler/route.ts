@@ -43,7 +43,6 @@ export async function POST(request: Request) {
       {
         userId: user.id,
         type,
-        fixtureId: "market_drop",
         origin: new URL(request.url).origin,
         forceId: `${user.id}:${type}:${session.date}:${due.triggers.join("+")}`,
       },

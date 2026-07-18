@@ -9,7 +9,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const origin = `${protocol}://${host}`;
   return {
     title: "盘面守望｜A 股风险提醒与每日复盘",
-    description: "给普通用户的 A 股盘面风险提醒、任务设置、成本评估和每日复盘工具。",
+    description: "展示真实 A 股主要指数快照，并提供风险规则测试、任务设置、成本评估和每日复盘。",
     applicationName: "盘面守望",
     manifest: "/manifest.webmanifest",
     appleWebApp: {

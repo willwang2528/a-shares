@@ -6,6 +6,7 @@ import {
   shouldPush,
   type UserSettings,
 } from "./domain";
+import { fetchExperimentalRealSnapshot } from "./market";
 import { acquireLease, ensureSchema, ensureUser, loadDashboardState } from "./storage";
 import { getNotificationProvider } from "./notifications";
 
@@ -34,7 +35,9 @@ export async function executeJob(
   const now = new Date().toISOString();
   const state = await loadDashboardState(db, input.userId);
   const settings = (state.settings ?? DEFAULT_SETTINGS) as UserSettings;
-  const snapshot = getFixture(input.fixtureId ?? "market_drop");
+  const snapshot = input.fixtureId
+    ? getFixture(input.fixtureId)
+    : await fetchExperimentalRealSnapshot();
   const tradeDate = snapshot.asOf.slice(0, 10);
   const idempotencyKey =
     input.forceId ??
@@ -42,6 +45,23 @@ export async function executeJob(
       ? `${input.userId}:daily_review:${tradeDate}`
       : `${input.userId}:${input.type}:${snapshot.fixtureId}:${snapshot.asOf}`);
   const runId = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO quote_snapshots
+       (id, provider, scope, data_time, payload_json, is_fresh, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      snapshot.provider,
+      snapshot.coverage ?? "full",
+      snapshot.asOf,
+      JSON.stringify(snapshot),
+      snapshot.dataComplete ? 1 : 0,
+      now,
+      now,
+    )
+    .run();
   const insert = await db
     .prepare(
       `INSERT OR IGNORE INTO scheduled_job_runs

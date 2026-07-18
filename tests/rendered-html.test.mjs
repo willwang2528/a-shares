@@ -9,8 +9,11 @@ test("production bundle contains the finished Chinese product", async () => {
   assert.ok(appBundle, "AStockApp client bundle should exist");
   const javascript = await readFile(new URL(appBundle, assetsUrl), "utf8");
   assert.match(javascript, /盘面守望/);
+  assert.match(javascript, /真实指数已更新/);
+  assert.match(javascript, /真实数据·实验源/);
   assert.match(javascript, /先算清，再开通/);
   assert.match(javascript, /只推异常/);
+  assert.doesNotMatch(javascript, /数据 14:30 · Mock/);
   assert.doesNotMatch(javascript, /Your site is taking shape|react-loading-skeleton/i);
   await access(new URL("../dist/client/og.png", import.meta.url));
   await access(new URL("../dist/client/manifest.webmanifest", import.meta.url));
