@@ -1,5 +1,18 @@
 import { DEFAULT_SETTINGS, type AlertEvent, type DailyReview, type UserSettings } from "./domain";
 
+export type StoredWatchItem = {
+  id: string;
+  user_id: string;
+  group_id: string | null;
+  object_type: "sector" | "stock";
+  code: string;
+  name: string;
+  tag: "watch" | "holding";
+  cost_price: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export async function ensureSchema(db: D1Database) {
   const statements = [
     `CREATE TABLE IF NOT EXISTS users (
@@ -19,6 +32,8 @@ export async function ensureSchema(db: D1Database) {
       object_type TEXT NOT NULL, code TEXT NOT NULL, name TEXT NOT NULL,
       tag TEXT NOT NULL, cost_price REAL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS watch_items_user_object_code
+      ON watch_items (user_id, object_type, code)`,
     `CREATE TABLE IF NOT EXISTS sector_mappings (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, input_name TEXT NOT NULL,
       provider TEXT NOT NULL, classification TEXT NOT NULL, sector_code TEXT NOT NULL,
@@ -137,10 +152,113 @@ export async function seedWatchItems(db: D1Database, userId: string) {
   if ((count?.count ?? 0) > 0) return;
   const now = new Date().toISOString();
   await db.batch([
-    db.prepare("INSERT INTO watch_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind("watch-sector-metal", userId, null, "sector", "SW-801050", "有色金属", "watch", null, now, now),
-    db.prepare("INSERT INTO watch_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind("watch-601600", userId, null, "stock", "601600.SH", "中国铝业", "holding", 7.86, now, now),
-    db.prepare("INSERT INTO watch_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind("watch-000858", userId, null, "stock", "000858.SZ", "五粮液", "watch", null, now, now),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO watch_items
+          (id, user_id, group_id, object_type, code, name, tag, cost_price, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(`watch-${userId}-sector-metal`, userId, null, "sector", "SW-801050", "有色金属", "watch", null, now, now),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO watch_items
+          (id, user_id, group_id, object_type, code, name, tag, cost_price, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(`watch-${userId}-601600`, userId, null, "stock", "601600.SH", "中国铝业", "holding", 7.86, now, now),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO watch_items
+          (id, user_id, group_id, object_type, code, name, tag, cost_price, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(`watch-${userId}-000858`, userId, null, "stock", "000858.SZ", "五粮液", "watch", null, now, now),
   ]);
+}
+
+export async function listWatchItems(db: D1Database, userId: string) {
+  const rows = await db
+    .prepare(
+      `SELECT * FROM watch_items
+       WHERE user_id = ?
+       ORDER BY CASE tag WHEN 'holding' THEN 0 ELSE 1 END, created_at ASC`,
+    )
+    .bind(userId)
+    .all<StoredWatchItem>();
+  return rows.results;
+}
+
+export async function addWatchItem(
+  db: D1Database,
+  userId: string,
+  input: {
+    objectType: "sector" | "stock";
+    code: string;
+    name: string;
+    tag: "watch" | "holding";
+  },
+) {
+  const existing = await db
+    .prepare(
+      `SELECT * FROM watch_items
+       WHERE user_id = ? AND object_type = ? AND code = ?`,
+    )
+    .bind(userId, input.objectType, input.code)
+    .first<StoredWatchItem>();
+  if (existing) return { created: false, item: existing };
+
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO watch_items
+        (id, user_id, group_id, object_type, code, name, tag, cost_price, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?)`,
+    )
+    .bind(
+      id,
+      userId,
+      input.objectType,
+      input.code,
+      input.name,
+      input.tag,
+      now,
+      now,
+    )
+    .run();
+  const item = await db
+    .prepare("SELECT * FROM watch_items WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<StoredWatchItem>();
+  return { created: true, item };
+}
+
+export async function updateWatchTag(
+  db: D1Database,
+  userId: string,
+  id: string,
+  tag: "watch" | "holding",
+) {
+  const result = await db
+    .prepare(
+      `UPDATE watch_items SET tag = ?, updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(tag, new Date().toISOString(), id, userId)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function deleteWatchItem(
+  db: D1Database,
+  userId: string,
+  id: string,
+) {
+  const result = await db
+    .prepare("DELETE FROM watch_items WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 export async function acquireLease(db: D1Database, leaseKey: string, owner: string, seconds = 45) {

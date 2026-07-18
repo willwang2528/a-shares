@@ -19,6 +19,8 @@ import {
   type RiskLevel,
   type UserSettings,
 } from "@/lib/domain";
+import type { WatchSearchResult } from "@/lib/instruments";
+import type { StockQuote } from "@/lib/market";
 
 type PageId =
   | "home"
@@ -36,6 +38,39 @@ type HealthItem = {
   status: string;
   message: string;
 };
+
+type WatchItem = {
+  id: string;
+  object_type: "sector" | "stock";
+  code: string;
+  name: string;
+  tag: "watch" | "holding";
+  cost_price: number | null;
+};
+
+type ApiData = {
+  ok?: boolean;
+  message?: string;
+  settings?: UserSettings;
+  alerts?: AlertEvent[];
+  reviews?: DailyReview[];
+  watches?: WatchItem[];
+  services?: HealthItem[];
+  snapshot?: MarketSnapshot;
+  results?: WatchSearchResult[];
+  sourceStatus?: "live" | "fallback" | "featured";
+  quotes?: StockQuote[];
+  payload?: {
+    events?: AlertEvent[];
+    snapshot?: MarketSnapshot;
+    review?: DailyReview;
+    delivery?: { message?: string };
+  };
+};
+
+async function readApiData(response: Response) {
+  return response.json() as Promise<ApiData>;
+}
 
 const NAV: Array<{ id: PageId; icon: string; label: string }> = [
   { id: "home", icon: "⌂", label: "首页" },
@@ -123,9 +158,16 @@ export function AStockApp() {
   const [saveState, setSaveState] = useState("正在连接云端保存…");
   const [running, setRunning] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [sectorInput, setSectorInput] = useState("");
-  const [sectorMatch, setSectorMatch] = useState(false);
-  const [sectorConfirmed, setSectorConfirmed] = useState(true);
+  const [watchInput, setWatchInput] = useState("");
+  const [watchItems, setWatchItems] = useState<WatchItem[]>([]);
+  const [searchResults, setSearchResults] = useState<WatchSearchResult[]>([]);
+  const [selectedResult, setSelectedResult] = useState<WatchSearchResult | null>(null);
+  const [searchMessage, setSearchMessage] = useState("常用选项正在载入…");
+  const [searching, setSearching] = useState(false);
+  const [watchMutation, setWatchMutation] = useState<string | null>(null);
+  const [newWatchTag, setNewWatchTag] = useState<"watch" | "holding">("watch");
+  const [stockQuotes, setStockQuotes] = useState<Record<string, StockQuote>>({});
+  const [watchQuoteError, setWatchQuoteError] = useState<string | null>(null);
   const [keyMomentDraft, setKeyMomentDraft] = useState("10:30");
   const [alertLevel, setAlertLevel] = useState<"all" | RiskLevel>("all");
   const [costInterval, setCostInterval] = useState(5);
@@ -145,20 +187,28 @@ export function AStockApp() {
     }
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
     fetch("/api/state", { cache: "no-store" })
-      .then(async (response) => ({ ok: response.ok, data: await response.json() }))
+      .then(async (response) => ({ ok: response.ok, data: await readApiData(response) }))
       .then(({ ok, data }) => {
         if (data.settings) setSettings(data.settings);
         if (Array.isArray(data.alerts) && data.alerts.length) setAlerts(data.alerts);
         if (Array.isArray(data.reviews) && data.reviews.length) setReviews(data.reviews);
+        if (Array.isArray(data.watches)) setWatchItems(data.watches);
         setSaveState(ok ? "已连接云端保存" : "当前为会话内演示配置");
       })
       .catch(() => setSaveState("当前为会话内演示配置"));
     fetch("/api/health", { cache: "no-store" })
-      .then((response) => response.json())
+      .then(readApiData)
       .then((data) => setHealth(data.services ?? []))
       .catch(() => setHealth([]));
+    fetch("/api/search", { cache: "no-store" })
+      .then(readApiData)
+      .then((data) => {
+        if (Array.isArray(data.results)) setSearchResults(data.results);
+        setSearchMessage(data.message ?? "可以输入名称或 6 位代码查找。");
+      })
+      .catch(() => setSearchMessage("常用选项读取失败，请直接输入名称或代码查找。"));
     fetch("/api/market", { cache: "no-store" })
-      .then(async (response) => ({ ok: response.ok, data: await response.json() }))
+      .then(async (response) => ({ ok: response.ok, data: await readApiData(response) }))
       .then(({ ok, data }) => {
         if (!ok || !data.snapshot) throw new Error(data.message);
         setSnapshot(data.snapshot);
@@ -173,11 +223,41 @@ export function AStockApp() {
       .finally(() => setMarketLoading(false));
   }, []);
 
+  useEffect(() => {
+    const codes = watchItems
+      .filter((item) => item.object_type === "stock")
+      .map((item) => item.code);
+    if (!codes.length) return;
+    let ignored = false;
+    fetch(`/api/watch-quotes?codes=${encodeURIComponent(codes.join(","))}`, {
+      cache: "no-store",
+    })
+      .then(async (response) => ({ ok: response.ok, data: await readApiData(response) }))
+      .then(({ ok, data }) => {
+        if (ignored) return;
+        if (!ok || !Array.isArray(data.quotes)) throw new Error(data.message);
+        setStockQuotes(
+          Object.fromEntries(
+            (data.quotes as StockQuote[]).map((quote) => [quote.code, quote]),
+          ),
+        );
+        setWatchQuoteError(null);
+      })
+      .catch(() => {
+        if (ignored) return;
+        setStockQuotes({});
+        setWatchQuoteError("真实股票行情暂时读取失败；没有使用演示涨跌幅替代。");
+      });
+    return () => {
+      ignored = true;
+    };
+  }, [watchItems]);
+
   async function refreshRealMarket() {
     setMarketLoading(true);
     try {
       const response = await fetch("/api/market", { cache: "no-store" });
-      const data = await response.json();
+      const data = await readApiData(response);
       if (!response.ok || !data.snapshot) throw new Error(data.message);
       setSnapshot(data.snapshot);
       setDataMode("real");
@@ -211,8 +291,8 @@ export function AStockApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message);
+      const data = await readApiData(response);
+      if (!response.ok || !data.settings) throw new Error(data.message);
       setSettings(data.settings);
       setSaveState("刚刚已保存");
       setToast("设置已经保存，刷新页面也会保留。");
@@ -234,7 +314,7 @@ export function AStockApp() {
           force: true,
         }),
       });
-      const result = await response.json();
+      const result = await readApiData(response);
       if (!response.ok || !result.ok) throw new Error(result.message);
       if (type === "scan") {
         const nextAlerts = result.payload?.events ?? currentAlerts;
@@ -253,7 +333,7 @@ export function AStockApp() {
         setToast(result.payload?.delivery?.message ?? "测试通知已写入日志。");
       }
       const healthResponse = await fetch("/api/health", { cache: "no-store" });
-      const healthData = await healthResponse.json();
+      const healthData = await readApiData(healthResponse);
       setHealth(healthData.services ?? []);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "任务失败，请检查系统状态。");
@@ -278,6 +358,100 @@ export function AStockApp() {
       tag: "market-watch-test",
     });
     setToast("已发出一条本机系统通知。它不是后台 Web Push。");
+  }
+
+  async function searchWatchCandidates(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    setSearching(true);
+    setSelectedResult(null);
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(watchInput.trim())}`, {
+        cache: "no-store",
+      });
+      const data = await readApiData(response);
+      if (!response.ok || !Array.isArray(data.results)) throw new Error(data.message);
+      setSearchResults(data.results);
+      setSearchMessage(
+        data.sourceStatus === "fallback"
+          ? `${data.message} 股票网络搜索暂时不可用，当前结果来自备用目录。`
+          : (data.message ?? "请选择一个候选后再确认关注。"),
+      );
+    } catch (error) {
+      setSearchResults([]);
+      setSearchMessage(error instanceof Error ? error.message : "查找失败，请稍后重试。");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function isAlreadyWatched(result: WatchSearchResult) {
+    return watchItems.some(
+      (item) =>
+        item.object_type === result.objectType && item.code === result.code,
+    );
+  }
+
+  async function addSelectedWatch() {
+    if (!selectedResult) return;
+    setWatchMutation(`add:${selectedResult.objectType}:${selectedResult.code}`);
+    try {
+      const response = await fetch("/api/watch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectType: selectedResult.objectType,
+          code: selectedResult.code,
+          name: selectedResult.name,
+          tag: newWatchTag,
+        }),
+      });
+      const data = await readApiData(response);
+      if (!response.ok || !Array.isArray(data.watches)) throw new Error(data.message);
+      setWatchItems(data.watches);
+      setSelectedResult(null);
+      setToast(data.message ?? "已加入关注。");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "添加失败，请稍后重试。");
+    } finally {
+      setWatchMutation(null);
+    }
+  }
+
+  async function changeWatchTag(item: WatchItem) {
+    setWatchMutation(`tag:${item.id}`);
+    const tag = item.tag === "holding" ? "watch" : "holding";
+    try {
+      const response = await fetch("/api/watch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id, tag }),
+      });
+      const data = await readApiData(response);
+      if (!response.ok || !Array.isArray(data.watches)) throw new Error(data.message);
+      setWatchItems(data.watches);
+      setToast(data.message ?? "标签已修改。");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "标签修改失败。");
+    } finally {
+      setWatchMutation(null);
+    }
+  }
+
+  async function removeWatch(item: WatchItem) {
+    setWatchMutation(`remove:${item.id}`);
+    try {
+      const response = await fetch(`/api/watch?id=${encodeURIComponent(item.id)}`, {
+        method: "DELETE",
+      });
+      const data = await readApiData(response);
+      if (!response.ok || !Array.isArray(data.watches)) throw new Error(data.message);
+      setWatchItems(data.watches);
+      setToast(`${item.name}已从关注列表移除。`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "移除失败。");
+    } finally {
+      setWatchMutation(null);
+    }
   }
 
   const scopeCount = costScope === "market" ? 5500 : costScope === "sector" ? 400 : 30;
@@ -443,20 +617,33 @@ export function AStockApp() {
                   <button className="text-button" onClick={() => go("watch")}>管理</button>
                 </div>
                 <div className="watch-list">
-                  {snapshot.sectors.map((sector) => (
-                    <article key={sector.code}>
-                      <span className="object-icon">板</span>
-                      <div><strong>{sector.name}</strong><small>{sector.source} · {sector.memberCount} 只</small></div>
-                      <b className={sector.changePct >= 0 ? "up" : "down"}>{signed(sector.changePct)}</b>
-                    </article>
-                  ))}
-                  {snapshot.stocks.slice(0, 2).map((stock) => (
-                    <article key={stock.code}>
-                      <span className="object-icon stock">股</span>
-                      <div><strong>{stock.name}</strong><small>{stock.code}</small></div>
-                      <b className={stock.changePct >= 0 ? "up" : "down"}>{signed(stock.changePct)}</b>
-                    </article>
-                  ))}
+                  {watchItems.length ? watchItems.slice(0, 3).map((item) => {
+                    const quote = stockQuotes[item.code];
+                    return (
+                      <article key={item.id}>
+                        <span className={`object-icon ${item.object_type === "stock" ? "stock" : ""}`}>
+                          {item.object_type === "stock" ? "股" : "板"}
+                        </span>
+                        <div>
+                          <strong>{item.name}</strong>
+                          <small>
+                            {item.code} · {item.tag === "holding" ? "持有" : "仅关注"}
+                          </small>
+                        </div>
+                        {quote ? (
+                          <b className={quote.changePct >= 0 ? "up" : "down"}>
+                            {signed(quote.changePct)}
+                          </b>
+                        ) : (
+                          <b className="quote-pending">
+                            {item.object_type === "sector" ? "待正式行情源" : "读取中"}
+                          </b>
+                        )}
+                      </article>
+                    );
+                  }) : (
+                    <Empty title="还没有关注对象" detail="到关注页搜索板块或股票，选择后会显示在这里。" />
+                  )}
                 </div>
               </div>
             </section>
@@ -477,30 +664,142 @@ export function AStockApp() {
         {page === "watch" && (
           <div className="page-stack">
             <section className="intro-card">
-              <div><Pill tone="green">先确认再添加</Pill><h2>告诉我你关心什么</h2><p>输入“有色金属”这类自然语言后，系统会展示匹配分类、代码和成分股数量，不会静默猜测。</p></div>
+              <div><Pill tone="green">先选择，再确认</Pill><h2>板块和股票都由你选择</h2><p>输入名称、常用说法或 6 位代码，系统返回多个候选并说明匹配原因；不会再把任何输入都猜成“有色金属”。</p></div>
               <span className="intro-glyph">◎</span>
             </section>
             <section className="panel">
-              <label className="search-field">
-                <span>搜索股票或板块</span>
-                <div><b aria-hidden="true">⌕</b><input value={sectorInput} onChange={(event) => setSectorInput(event.target.value)} placeholder="例如：有色金属 / 601600" /><button onClick={() => setSectorMatch(true)}>查找</button></div>
-              </label>
-              {sectorMatch && (
+              <form className="watch-search-form" onSubmit={searchWatchCandidates}>
+                <label className="search-field">
+                  <span>搜索股票或板块</span>
+                  <div>
+                    <b aria-hidden="true">⌕</b>
+                    <input
+                      value={watchInput}
+                      onChange={(event) => setWatchInput(event.target.value)}
+                      placeholder="例如：银行 / 宁德时代 / 300750"
+                      aria-describedby="watch-search-help"
+                    />
+                    <button type="submit" disabled={searching}>
+                      {searching ? "查找中…" : "查找"}
+                    </button>
+                  </div>
+                </label>
+              </form>
+              <div className="search-summary" id="watch-search-help" role="status">
+                <span>{watchInput.trim() ? "搜索结果" : "常用选项"}</span>
+                <p>{searchMessage}</p>
+              </div>
+              {searchResults.length ? (
+                <div className="search-results" aria-label="可选板块和股票">
+                  {searchResults.map((result) => {
+                    const key = `${result.objectType}:${result.code}`;
+                    const selected =
+                      selectedResult?.objectType === result.objectType &&
+                      selectedResult.code === result.code;
+                    const watched = isAlreadyWatched(result);
+                    return (
+                      <article className={selected ? "selected" : ""} key={key}>
+                        <span className={`object-icon ${result.objectType === "stock" ? "stock" : ""}`}>
+                          {result.objectType === "stock" ? "股" : "板"}
+                        </span>
+                        <div>
+                          <div className="candidate-title">
+                            <strong>{result.name}</strong>
+                            <Pill tone={result.objectType === "sector" ? "green" : "amber"}>
+                              {result.objectType === "sector" ? "板块" : "股票"}
+                            </Pill>
+                          </div>
+                          <p>{result.code} · {result.classification}</p>
+                          <small>{result.matchReason}</small>
+                        </div>
+                        <button
+                          type="button"
+                          className={watched ? "candidate-added" : ""}
+                          disabled={watched}
+                          aria-pressed={selected}
+                          onClick={() => {
+                            setSelectedResult(result);
+                            setNewWatchTag("watch");
+                          }}
+                        >
+                          {watched ? "已关注" : selected ? "已选择" : "选择"}
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {selectedResult && (
                 <div className="mapping-card">
-                  <div className="mapping-top"><span className="object-icon">板</span><div><strong>匹配到：有色金属</strong><p>输入内容：{sectorInput || "有色金属"}</p></div><Pill tone="amber">待确认</Pill></div>
-                  <dl><div><dt>数据源分类</dt><dd>申万一级行业</dd></div><div><dt>指数代码</dt><dd>SW-801050</dd></div><div><dt>成分股</dt><dd>134 只</dd></div></dl>
-                  <p className="plain-note">人话解释：系统会按申万行业里的“有色金属”监控，而不是把名称相似的概念板块混进来。</p>
-                  <div className="inline-actions"><button className="button button-dark" onClick={() => { setSectorConfirmed(true); setSectorMatch(false); setToast("已确认板块映射。"); }}>确认并关注</button><button className="button button-light" onClick={() => setSectorMatch(false)}>取消</button></div>
+                  <div className="mapping-top">
+                    <span className={`object-icon ${selectedResult.objectType === "stock" ? "stock" : ""}`}>
+                      {selectedResult.objectType === "stock" ? "股" : "板"}
+                    </span>
+                    <div>
+                      <strong>你选择了：{selectedResult.name}</strong>
+                      <p>{selectedResult.matchReason}</p>
+                    </div>
+                    <Pill tone="amber">待确认</Pill>
+                  </div>
+                  <dl>
+                    <div><dt>数据源分类</dt><dd>{selectedResult.classification}</dd></div>
+                    <div><dt>{selectedResult.objectType === "sector" ? "行业代码" : "股票代码"}</dt><dd>{selectedResult.code}</dd></div>
+                    <div>
+                      <dt>{selectedResult.objectType === "sector" ? "成分股数量" : "行情状态"}</dt>
+                      <dd>{selectedResult.objectType === "sector" ? "待正式源确认" : "添加后读取真实快照"}</dd>
+                    </div>
+                  </dl>
+                  <p className="plain-note">
+                    人话解释：{selectedResult.objectType === "sector"
+                      ? `将按“${selectedResult.classification}”里的“${selectedResult.name}”监控；成分股数量会变化，未接正式数据源前不展示猜测数字。`
+                      : "这里只确认你要关注哪只 A 股；添加后读取公开页面的真实行情，读取失败时明确显示不可用。"}
+                    {" "}
+                    <a href={selectedResult.sourceUrl} target="_blank" rel="noreferrer">
+                      查看来源 ↗
+                    </a>
+                  </p>
+                  <div className="confirm-row">
+                    <label>
+                      <span>关注标签</span>
+                      <select value={newWatchTag} onChange={(event) => setNewWatchTag(event.target.value as "watch" | "holding")}>
+                        <option value="watch">仅关注</option>
+                        <option value="holding">持有</option>
+                      </select>
+                    </label>
+                    <div className="inline-actions">
+                      <button
+                        type="button"
+                        className="button button-dark"
+                        disabled={watchMutation?.startsWith("add:")}
+                        onClick={addSelectedWatch}
+                      >
+                        {watchMutation?.startsWith("add:") ? "保存中…" : "确认并关注"}
+                      </button>
+                      <button type="button" className="button button-light" onClick={() => setSelectedResult(null)}>取消</button>
+                    </div>
+                  </div>
                 </div>
               )}
             </section>
             <section>
-              <div className="section-head"><div><p className="eyebrow">当前关注</p><h2>板块和股票</h2></div><Pill tone="neutral">3 项</Pill></div>
-              <div className="object-grid">
-                {sectorConfirmed && <WatchObject type="sector" name="有色金属" code="申万一级 · SW-801050" tag="仅关注" value="-3.42%" tone="down" />}
-                <WatchObject type="stock" name="中国铝业" code="601600.SH · 成本价 7.86" tag="持有" value="-9.54%" tone="down" />
-                <WatchObject type="stock" name="五粮液" code="000858.SZ" tag="仅关注" value="-5.76%" tone="down" />
-              </div>
+              <div className="section-head"><div><p className="eyebrow">当前关注</p><h2>你选择的板块和股票</h2></div><Pill tone="neutral">{watchItems.length} 项</Pill></div>
+              {watchItems.length ? (
+                <div className="object-grid">
+                  {watchItems.map((item) => (
+                    <WatchObject
+                      key={item.id}
+                      item={item}
+                      quote={stockQuotes[item.code]}
+                      busy={watchMutation?.endsWith(item.id) ?? false}
+                      onTag={() => changeWatchTag(item)}
+                      onRemove={() => removeWatch(item)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <Empty title="还没有关注对象" detail="从上面的候选中选择一个，确认后会保存到这里。" />
+              )}
+              {watchQuoteError && watchItems.some((item) => item.object_type === "stock") ? <p className="data-warning">{watchQuoteError}</p> : null}
               <p className="disclaimer">手填成本价只用于排序和风险提醒；系统不接券商账户、不读取持仓，也不会自动下单。</p>
             </section>
           </div>
@@ -598,8 +897,63 @@ function TaskHeader({ number, title, detail, enabled, onChange }: { number: stri
   return <div className="task-head"><span>{number}</span><div><h2>{title}</h2><p>{detail}</p></div><Toggle checked={enabled} onChange={onChange} label={`${title}总开关`} /></div>;
 }
 
-function WatchObject({ type, name, code, tag, value, tone }: { type: "sector" | "stock"; name: string; code: string; tag: string; value: string; tone: string }) {
-  return <article className="object-card"><div className="object-card-top"><span className={`object-icon ${type === "stock" ? "stock" : ""}`}>{type === "stock" ? "股" : "板"}</span><Pill tone={tag === "持有" ? "amber" : "neutral"}>{tag}</Pill></div><h3>{name}</h3><p>{code}</p><b className={tone}>{value}</b><button aria-label={`管理 ${name}`}>管理</button></article>;
+function WatchObject({
+  item,
+  quote,
+  busy,
+  onTag,
+  onRemove,
+}: {
+  item: WatchItem;
+  quote?: StockQuote;
+  busy: boolean;
+  onTag: () => void;
+  onRemove: () => void;
+}) {
+  const isStock = item.object_type === "stock";
+  return (
+    <article className="object-card">
+      <div className="object-card-top">
+        <span className={`object-icon ${isStock ? "stock" : ""}`}>
+          {isStock ? "股" : "板"}
+        </span>
+        <Pill tone={item.tag === "holding" ? "amber" : "neutral"}>
+          {item.tag === "holding" ? "持有" : "仅关注"}
+        </Pill>
+      </div>
+      <h3>{item.name}</h3>
+      <p>
+        {item.code}
+        {item.cost_price ? ` · 手填成本价 ${item.cost_price}` : ""}
+      </p>
+      {quote ? (
+        <div className="object-quote">
+          <strong>¥{quote.value.toFixed(2)}</strong>
+          <b className={quote.changePct >= 0 ? "up" : "down"}>
+            {signed(quote.changePct)}
+          </b>
+          <small>真实快照 · {quote.asOf.slice(5, 16).replace("T", " ")}</small>
+        </div>
+      ) : (
+        <div className="object-quote pending">
+          <strong>{isStock ? "真实行情读取中" : "行业行情待正式源"}</strong>
+          <small>
+            {isStock
+              ? "读取失败时不会显示演示价格"
+              : "当前只保存你的板块选择，不猜测涨跌幅"}
+          </small>
+        </div>
+      )}
+      <div className="object-actions">
+        <button type="button" onClick={onTag} disabled={busy}>
+          {item.tag === "holding" ? "改为仅关注" : "标记持有"}
+        </button>
+        <button type="button" className="remove" onClick={onRemove} disabled={busy}>
+          {busy ? "处理中…" : "移除"}
+        </button>
+      </div>
+    </article>
+  );
 }
 
 function AlertCard({ event, expanded = false }: { event: AlertEvent; expanded?: boolean }) {

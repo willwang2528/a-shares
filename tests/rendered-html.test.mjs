@@ -13,6 +13,10 @@ test("production bundle contains the finished Chinese product", async () => {
   assert.match(javascript, /真实数据·实验源/);
   assert.match(javascript, /先算清，再开通/);
   assert.match(javascript, /只推异常/);
+  assert.match(javascript, /板块和股票都由你选择/);
+  assert.match(javascript, /系统返回多个候选并说明匹配原因/);
+  assert.match(javascript, /真实行情读取中/);
+  assert.doesNotMatch(javascript, /-3\.42%|-9\.54%|-5\.76%/);
   assert.doesNotMatch(javascript, /数据 14:30 · Mock/);
   assert.doesNotMatch(javascript, /Your site is taking shape|react-loading-skeleton/i);
   await access(new URL("../dist/client/og.png", import.meta.url));

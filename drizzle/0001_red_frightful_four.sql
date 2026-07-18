@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `watch_items_user_object_code` ON `watch_items` (`user_id`,`object_type`,`code`);

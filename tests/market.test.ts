@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseTencentQuoteResponse } from "../lib/market.ts";
+import {
+  parseTencentQuoteResponse,
+  parseTencentStockQuoteResponse,
+} from "../lib/market.ts";
 import { evaluateRules, generateDeterministicReview } from "../lib/domain.ts";
 
 function quote(variable: string, value: number, changePct: number, time: string) {
@@ -45,4 +48,18 @@ test("rejects an incomplete real quote response", () => {
       ),
     /返回数量不完整/,
   );
+});
+
+test("parses selected-stock real quotes with provider timestamps", () => {
+  const fields = Array.from({ length: 35 }, () => "");
+  fields[3] = "8.44";
+  fields[30] = "20260717161442";
+  fields[32] = "-2.76";
+  const quotes = parseTencentStockQuoteResponse(
+    `v_sh601600="1~中国铝业~601600~${fields.slice(3).join("~")}";`,
+  );
+  assert.equal(quotes[0]?.code, "601600.SH");
+  assert.equal(quotes[0]?.value, 8.44);
+  assert.equal(quotes[0]?.changePct, -2.76);
+  assert.equal(quotes[0]?.asOf, "2026-07-17T16:14:42+08:00");
 });

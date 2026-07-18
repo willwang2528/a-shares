@@ -25,17 +25,27 @@ export const watchGroups = sqliteTable("watch_groups", {
   ...audit,
 });
 
-export const watchItems = sqliteTable("watch_items", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id),
-  groupId: text("group_id"),
-  objectType: text("object_type").notNull(),
-  code: text("code").notNull(),
-  name: text("name").notNull(),
-  tag: text("tag").notNull(),
-  costPrice: real("cost_price"),
-  ...audit,
-});
+export const watchItems = sqliteTable(
+  "watch_items",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    groupId: text("group_id"),
+    objectType: text("object_type").notNull(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    tag: text("tag").notNull(),
+    costPrice: real("cost_price"),
+    ...audit,
+  },
+  (table) => [
+    uniqueIndex("watch_items_user_object_code").on(
+      table.userId,
+      table.objectType,
+      table.code,
+    ),
+  ],
+);
 
 export const sectorMappings = sqliteTable("sector_mappings", {
   id: text("id").primaryKey(),
