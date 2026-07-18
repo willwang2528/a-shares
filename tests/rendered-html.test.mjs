@@ -16,3 +16,12 @@ test("production bundle contains the finished Chinese product", async () => {
   await access(new URL("../dist/client/manifest.webmanifest", import.meta.url));
   await access(new URL("../dist/.openai/drizzle/0000_goofy_paladin.sql", import.meta.url));
 });
+
+test("mobile layouts cover the required 360, 390 and 430 pixel widths", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /@media \(max-width: 760px\)/, "430px should use the mobile layout");
+  assert.match(css, /@media \(max-width: 390px\)/, "390px and 360px should use the compact layout");
+  assert.match(css, /\.sidebar\s*\{\s*display: none;/s);
+  assert.match(css, /\.mobile-nav\s*\{[\s\S]*?display: grid;/);
+  assert.match(css, /\.mobile-nav button\s*\{[\s\S]*?min-width: 0;/);
+});
