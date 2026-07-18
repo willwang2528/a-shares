@@ -1,0 +1,135 @@
+{
+  "checked_at": "2026-07-18",
+  "currency_note": "人民币为主；模型美元费用按 1 USD = 7.20 CNY 的可编辑估算汇率折算，不等于结算汇率。",
+  "assumptions": {
+    "trading_days_per_month": 22,
+    "trading_minutes_per_day": 240,
+    "a_share_instruments": 5500,
+    "bytes_per_quote_row": 160,
+    "usd_cny_estimate": 7.2
+  },
+  "sources": [
+    {
+      "id": "tushare",
+      "name": "Tushare Pro 权限与价格",
+      "url": "https://tushare.pro/document/1?doc_id=290",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "jqdata",
+      "name": "聚宽 JQData 数据范围",
+      "url": "https://www.joinquant.com/data",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "jqdata_docs",
+      "name": "聚宽 JQData 使用说明",
+      "url": "https://www.joinquant.com/help/api/doc?id=10276&name=JQDatadoc",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "rqdata",
+      "name": "米筐 RQData 产品说明",
+      "url": "https://www.ricequant.com/welcome/rqdata",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "rqdata_pricing",
+      "name": "米筐产品价格与试用",
+      "url": "https://www.ricequant.com/welcome/pricing",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "rqdata_purchase",
+      "name": "米筐购买说明与调用限制",
+      "url": "https://www.ricequant.com/welcome/purchase",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "cloudbase_pricing",
+      "name": "腾讯云 CloudBase 官方定价",
+      "url": "https://buy.cloud.tencent.com/price/tcb",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "cloudbase_features",
+      "name": "腾讯云 CloudBase 功能与版本",
+      "url": "https://cloud.tencent.com/document/product/876/40406",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "serverchan",
+      "name": "Server酱 Turbo API 与限制",
+      "url": "https://sct.ftqq.com/r/373",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "serverchan_price",
+      "name": "Server酱订阅价格",
+      "url": "https://sct.ftqq.com/subscribe",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "webpush",
+      "name": "MDN Web Push API",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Push_API",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "resend",
+      "name": "Resend 邮件官方价格",
+      "url": "https://resend.com/pricing",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "openai_plus",
+      "name": "OpenAI：Plus 与 API 分开计费",
+      "url": "https://help.openai.com/en/articles/6950777-what-is-chatgpt-plus",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "openai_mini",
+      "name": "OpenAI GPT-5 mini API 价格",
+      "url": "https://developers.openai.com/api/docs/models/gpt-5-mini",
+      "checked_at": "2026-07-18"
+    },
+    {
+      "id": "sse_calendar",
+      "name": "上交所 2026 年休市安排",
+      "url": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
+      "checked_at": "2026-07-18"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "light",
+      "name": "轻量验证",
+      "interval_minutes": 30,
+      "scope": "Mock 盘中 + 官方日线盘后",
+      "monthly_cny": 16.67,
+      "annual_cny": 200,
+      "included": ["Tushare 2000 积分档按年折月", "CloudBase 免费体验额度", "Server酱免费 5 条/日", "不调用大模型"],
+      "not_enabled": ["真实盘中行情", "高频通知"]
+    },
+    {
+      "id": "recommended",
+      "name": "推荐自用",
+      "interval_minutes": 5,
+      "scope": "全市场实时日线快照，自行计算 5 分钟变化",
+      "monthly_cny": 223.87,
+      "annual_cny": 2686.44,
+      "included": ["Tushare 实时日线 200 元/月", "CloudBase 个人版 19.9 元/月", "Server酱年付折月 3.25 元", "每天一次 GPT-5 mini 复盘约 0.72 元/月"],
+      "not_enabled": ["完整实时分钟线", "公告独立权限", "公开行情再分发"]
+    },
+    {
+      "id": "high",
+      "name": "高频完整分钟",
+      "interval_minutes": 5,
+      "scope": "真实分钟行情 + 更高云资源配额",
+      "monthly_cny": 1202.97,
+      "annual_cny": 14435.64,
+      "included": ["Tushare 实时分钟 1000 元/月", "CloudBase 标准版 199 元/月", "Server酱年付折月 3.25 元", "每天一次 GPT-5 mini 复盘约 0.72 元/月"],
+      "not_enabled": ["历史分钟权限 2000 元/年", "新闻公告权限", "机构或商业授权"]
+    }
+  ]
+}
