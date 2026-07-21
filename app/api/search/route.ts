@@ -1,10 +1,9 @@
 import {
   mergeSearchResults,
-  searchLocalStockCatalog,
-  searchSectorCatalog,
   searchTencentStocks,
 } from "@/lib/instruments";
 import type { WatchSearchResult } from "@/lib/instruments";
+import { searchSinaSectors } from "@/lib/sina-sectors";
 
 export const dynamic = "force-dynamic";
 
@@ -17,24 +16,25 @@ export async function GET(request: Request) {
     );
   }
 
-  const sectors = searchSectorCatalog(query, query ? 8 : 6);
-  const localStocks = searchLocalStockCatalog(query, query ? 8 : 6);
+  let sectors: WatchSearchResult[] = [];
   let remoteStocks: WatchSearchResult[] = [];
-  let sourceStatus: "live" | "fallback" | "featured" = query
-    ? "live"
-    : "featured";
-  if (query) {
-    try {
-      remoteStocks = await searchTencentStocks(query);
-    } catch {
-      sourceStatus = "fallback";
-    }
+  let sourceStatus: "live" | "fallback" | "featured" = query ? "live" : "featured";
+  const [sectorResult, stockResult] = await Promise.allSettled([
+    searchSinaSectors(query, query ? 10 : 8),
+    query ? searchTencentStocks(query) : Promise.resolve([]),
+  ]);
+  if (sectorResult.status === "fulfilled") sectors = sectorResult.value;
+  if (stockResult.status === "fulfilled") {
+    remoteStocks = stockResult.value;
+  }
+  if (sectorResult.status === "rejected" || stockResult.status === "rejected") {
+    sourceStatus = "fallback";
   }
 
   const results = mergeSearchResults(
     sectors,
     remoteStocks,
-    localStocks,
+    [],
     query ? 12 : 10,
   );
   return Response.json(
@@ -45,7 +45,9 @@ export async function GET(request: Request) {
       sourceStatus,
       message: results.length
         ? `找到 ${results.length} 个候选，请选择后再确认关注。`
-        : "没有找到匹配项，请尝试完整股票名称、6 位代码或更短的板块关键词。",
+        : sourceStatus === "fallback"
+          ? "真实搜索源暂时不可用，没有使用本地固定列表替代。"
+          : "没有找到匹配项，请尝试完整股票名称、6 位代码或更短的板块关键词。",
     },
     { headers: { "Cache-Control": "no-store" } },
   );

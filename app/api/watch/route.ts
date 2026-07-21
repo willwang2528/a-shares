@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import { findSectorByCode } from "@/lib/instruments";
 import {
   addWatchItem,
   deleteWatchItem,
@@ -48,11 +47,11 @@ export async function POST(request: Request) {
     }
     const objectType = body.objectType as "sector" | "stock";
     const code = body.code?.trim().toUpperCase() ?? "";
-    let name = body.name?.trim() ?? "";
+    const name = body.name?.trim() ?? "";
     if (objectType === "sector") {
-      const sector = findSectorByCode(code);
-      if (!sector) return json({ ok: false, message: "板块代码不在当前可选目录中。" }, 400);
-      name = sector.name;
+      if (!/^SINA:[A-Z0-9_]+$/.test(code)) {
+        return json({ ok: false, message: "板块代码不是来自当前真实目录。" }, 400);
+      }
     } else if (!/^\d{6}\.(SH|SZ|BJ)$/.test(code)) {
       return json({ ok: false, message: "股票代码格式不正确。" }, 400);
     }

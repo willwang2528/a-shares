@@ -10,7 +10,7 @@ export async function GET() {
         ok: true,
         snapshot,
         limitation:
-          "当前只覆盖四个主要指数。市场宽度、板块、个股及涨跌停仍需正式授权数据源。",
+          "当前快照覆盖六个主要指数。全市场复盘、板块和涨跌停使用独立真实数据链路。",
       },
       {
         headers: {

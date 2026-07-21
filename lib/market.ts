@@ -5,7 +5,7 @@ import {
 } from "./domain";
 
 const TENCENT_QUOTE_URL =
-  "https://qt.gtimg.cn/q=sh000001,sz399001,sz399006,sh000300";
+  "https://qt.gtimg.cn/q=sh000001,sz399001,sz399006,sh000688,sh000300,sh000852";
 
 const INDEX_DEFINITIONS: Record<
   string,
@@ -14,7 +14,9 @@ const INDEX_DEFINITIONS: Record<
   sh000001: { code: "000001.SH", name: "上证指数" },
   sz399001: { code: "399001.SZ", name: "深证成指" },
   sz399006: { code: "399006.SZ", name: "创业板指" },
+  sh000688: { code: "000688.SH", name: "科创 50" },
   sh000300: { code: "000300.SH", name: "沪深 300" },
+  sh000852: { code: "000852.SH", name: "中证 1000" },
 };
 
 export type StockQuote = {

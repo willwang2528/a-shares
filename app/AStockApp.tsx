@@ -23,6 +23,7 @@ import type {
 } from "@/lib/historical-review";
 import type { WatchSearchResult } from "@/lib/instruments";
 import type { StockQuote } from "@/lib/market";
+import type { MarketDailyReview } from "@/lib/daily-market-review";
 
 type PageId =
   | "home"
@@ -55,6 +56,7 @@ type ApiData = {
   message?: string;
   settings?: UserSettings;
   alerts?: AlertEvent[];
+  events?: AlertEvent[];
   watches?: WatchItem[];
   services?: HealthItem[];
   snapshot?: MarketSnapshot;
@@ -64,6 +66,8 @@ type ApiData = {
   historical?: HistoricalReviewResult;
   cacheHit?: boolean;
   cacheExpiresAt?: string;
+  review?: MarketDailyReview;
+  stale?: boolean;
   payload?: {
     events?: AlertEvent[];
     snapshot?: MarketSnapshot;
@@ -75,15 +79,15 @@ async function readApiData(response: Response) {
   return response.json() as Promise<ApiData>;
 }
 
-const NAV: Array<{ id: PageId; icon: string; label: string }> = [
-  { id: "home", icon: "⌂", label: "首页" },
-  { id: "watch", icon: "◎", label: "关注" },
-  { id: "tasks", icon: "◷", label: "任务" },
-  { id: "alerts", icon: "!", label: "预警" },
-  { id: "reviews", icon: "▤", label: "复盘" },
-  { id: "notifications", icon: "↗", label: "通知" },
-  { id: "costs", icon: "¥", label: "成本" },
-  { id: "status", icon: "●", label: "状态" },
+const NAV: Array<{ id: PageId; icon: string; label: string; available: boolean }> = [
+  { id: "home", icon: "⌂", label: "首页", available: true },
+  { id: "watch", icon: "◎", label: "关注", available: true },
+  { id: "alerts", icon: "!", label: "预警", available: true },
+  { id: "reviews", icon: "▤", label: "复盘", available: true },
+  { id: "tasks", icon: "◷", label: "任务", available: false },
+  { id: "notifications", icon: "↗", label: "通知", available: false },
+  { id: "costs", icon: "¥", label: "成本", available: false },
+  { id: "status", icon: "●", label: "状态", available: false },
 ];
 
 const PUSH_MODE_COPY = {
@@ -98,6 +102,10 @@ function signed(value: number) {
 
 function formatMb(value: number) {
   return value >= 1000 ? `${(value / 1000).toFixed(2)} GB` : `${value.toFixed(1)} MB`;
+}
+
+function formatYi(value: number) {
+  return `${(value / 100_000_000).toLocaleString("zh-CN", { maximumFractionDigits: 0 })} 亿元`;
 }
 
 function shanghaiDate(date = new Date()) {
@@ -189,6 +197,9 @@ export function AStockApp() {
     useState<HistoricalReviewResponse | null>(null);
   const [historicalLoading, setHistoricalLoading] = useState(false);
   const [historicalError, setHistoricalError] = useState<string | null>(null);
+  const [marketReview, setMarketReview] = useState<MarketDailyReview | null>(null);
+  const [marketReviewLoading, setMarketReviewLoading] = useState(true);
+  const [marketReviewError, setMarketReviewError] = useState<string | null>(null);
 
   const currentAlerts = useMemo(() => evaluateRules(snapshot, settings), [snapshot, settings]);
   const risk = highestRisk(currentAlerts);
@@ -236,6 +247,25 @@ export function AStockApp() {
         setMarketError("实时刷新失败，当前显示上次成功读取的真实收盘快照，时间见页面标注。");
       })
       .finally(() => setMarketLoading(false));
+    fetch("/api/daily-market-review", { cache: "no-store" })
+      .then(async (response) => ({ ok: response.ok, data: await readApiData(response) }))
+      .then(({ ok, data }) => {
+        if (!ok || !data.review) throw new Error(data.message);
+        setMarketReview(data.review);
+        if (Array.isArray(data.events) && data.events.length) {
+          setAlerts((current) => {
+            const merged = [...data.events!, ...current];
+            return merged.filter(
+              (event, index) => merged.findIndex((item) => item.id === event.id) === index,
+            );
+          });
+        }
+        setMarketReviewError(data.stale ? (data.message ?? "当前显示上一次成功缓存。") : null);
+      })
+      .catch((error) => {
+        setMarketReviewError(error instanceof Error ? error.message : "没有可用的真实收盘复盘。");
+      })
+      .finally(() => setMarketReviewLoading(false));
   }, []);
 
   useEffect(() => {
@@ -506,7 +536,8 @@ export function AStockApp() {
           <span><strong>Aria 监盘</strong><small>A 股真实数据提醒</small></span>
         </button>
         <nav>
-          {NAV.map((item) => (
+          <span className="nav-group-label">核心功能</span>
+          {NAV.filter((item) => item.available).map((item) => (
             <button
               key={item.id}
               className={page === item.id ? "active" : ""}
@@ -515,6 +546,17 @@ export function AStockApp() {
             >
               <span aria-hidden="true">{item.icon}</span>{item.label}
               {item.id === "alerts" && alerts.length > 0 ? <b>{alerts.length}</b> : null}
+            </button>
+          ))}
+          <span className="nav-group-label nav-group-secondary">设置与建设</span>
+          {NAV.filter((item) => !item.available).map((item) => (
+            <button
+              key={item.id}
+              className={`nav-secondary ${page === item.id ? "active" : ""}`}
+              onClick={() => go(item.id)}
+              aria-current={page === item.id ? "page" : undefined}
+            >
+              <span aria-hidden="true">{item.icon}</span>{item.label}
             </button>
           ))}
         </nav>
@@ -554,7 +596,7 @@ export function AStockApp() {
                 <h2>
                   {marketLoading ? "正在检查行情更新" : "真实指数已更新"}
                 </h2>
-                <p>当前真实数据覆盖四个主要指数和已关注股票。市场宽度、行业成分和涨跌停仍缺少正式数据，所以不生成相关结论。</p>
+                <p>当前真实数据覆盖六个主要指数和已关注股票。市场宽度、行业成分和涨跌停只有在真实字段完整时才生成结论。</p>
                 {marketError ? <p className="source-warning">{marketError}</p> : null}
                 <div className="hero-actions">
                   <button className="button button-dark" onClick={() => refreshRealMarket()} disabled={marketLoading}>
@@ -567,7 +609,7 @@ export function AStockApp() {
               </div>
               <div
                 className="breadth-ring"
-                aria-label="四个真实主要指数"
+                aria-label="六个真实主要指数"
               >
                 <strong>{snapshot.indices.length}</strong>
                 <span>真实指数</span>
@@ -601,16 +643,54 @@ export function AStockApp() {
             </section>
 
             <section className="two-column">
-                <div className="panel coverage-panel">
-                  <Pill tone="amber">尚未覆盖</Pill>
-                  <h2>市场宽度与涨跌停</h2>
-                  <p>公开指数快照不包含全市场上涨、下跌、涨停和跌停家数。正式数据接入前，这里只显示“尚未覆盖”，也不触发相关规则。</p>
-                </div>
-                <div className="panel coverage-panel">
-                  <Pill tone="amber">尚未覆盖</Pill>
-                  <h2>行业成分与当日涨跌停价</h2>
-                  <p>自选股价格已读取真实快照；行业成分、行业涨跌幅和个股当日涨跌停价尚无可用数据。</p>
-                </div>
+              {marketReviewLoading ? (
+                <div className="panel coverage-panel"><Pill tone="neutral">读取中</Pill><h2>上一交易日全市场复盘</h2><p>正在读取真实收盘数据和云端缓存。</p></div>
+              ) : marketReview ? (
+                <>
+                  <div className="panel market-review-summary">
+                    <Pill tone="green">{marketReview.tradeDate} 真实收盘复盘</Pill>
+                    <h2>{marketReview.summary.headline}</h2>
+                    <div className="market-review-metrics">
+                      <span><small>沪市成交</small><strong>{formatYi(marketReview.turnover.shanghaiYuan)}</strong></span>
+                      <span><small>深市成交</small><strong>{formatYi(marketReview.turnover.shenzhenYuan)}</strong></span>
+                      <span><small>上涨 / 下跌</small><strong>{marketReview.breadth.up} / {marketReview.breadth.down}</strong></span>
+                      <span><small>平盘</small><strong>{marketReview.breadth.flat}</strong></span>
+                    </div>
+                    <ul>{marketReview.summary.facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>
+                    {marketReview.strongestIndustries.length ? (
+                      <div className="market-direction-list">
+                        <strong>相对较强行业 · 成分股等权口径</strong>
+                        {marketReview.strongestIndustries.map((item) => (
+                          <span key={item.name}>
+                            <b>{item.name} {signed(item.changePct)}</b>
+                            <small>成交 {formatYi(item.turnoverYuan)} · 核心股 {item.coreStock}</small>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="panel market-review-checks">
+                    <Pill tone="amber">明日客观观察</Pill>
+                    <h2>只列可继续核验的条件</h2>
+                    <ol>{marketReview.summary.tomorrowChecks.map((item) => <li key={item}>{item}</li>)}</ol>
+                    {marketReview.lossDirections.length ? (
+                      <div className="market-direction-list loss">
+                        <strong>主要承压方向</strong>
+                        {marketReview.lossDirections.map((item) => (
+                          <span key={item.name}>
+                            <b>{item.name} {signed(item.changePct)}</b>
+                            <small>核心股 {item.coreStock} · {item.finalState}</small>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {marketReview.limits.unavailableReason ? <p className="source-warning">涨跌停与炸板：{marketReview.limits.unavailableReason}</p> : null}
+                    <small>数据时间：{marketReview.asOf.slice(0, 16).replace("T", " ")} · {marketReview.provider}</small>
+                  </div>
+                </>
+              ) : (
+                <div className="panel coverage-panel"><Pill tone="amber">没有数据</Pill><h2>上一交易日全市场复盘</h2><p>{marketReviewError ?? "真实数据源没有返回可验证的收盘复盘。"}</p></div>
+              )}
             </section>
 
             <section>
@@ -621,6 +701,14 @@ export function AStockApp() {
               <div className="alert-list">
                 {currentAlerts.length ? currentAlerts.slice(0, 3).map((event) => <AlertCard key={event.id} event={event} />) : <Empty title="暂无可生成的真实预警" detail="当前真实数据覆盖不足；未覆盖的规则不会生成预警。" />}
               </div>
+            </section>
+            <section className="watch-review-link panel">
+              <div>
+                <Pill tone="green">关注决定复盘范围</Pill>
+                <h2>当前有 {watchItems.filter((item) => item.object_type === "stock").length} 只股票会进入历史复盘</h2>
+                <p>行业分类用于观察方向，不会被当成单只股票计算价格。添加或移除股票后，下一次复盘会自动使用新的股票集合和缓存键。</p>
+              </div>
+              <button className="button button-dark" onClick={() => go("reviews")}>按当前关注去复盘</button>
             </section>
           </div>
         )}
@@ -766,6 +854,14 @@ export function AStockApp() {
               {watchQuoteError && watchItems.some((item) => item.object_type === "stock") ? <p className="data-warning">{watchQuoteError}</p> : null}
               <p className="disclaimer">手填成本价只用于排序和风险提醒；系统不接券商账户、不读取持仓，也不会自动下单。</p>
             </section>
+            <section className="watch-review-link panel">
+              <div>
+                <Pill tone="green">下一步：按关注范围复盘</Pill>
+                <h2>{watchItems.filter((item) => item.object_type === "stock").length} 只股票会进入历史复盘</h2>
+                <p>行业分类只作为观察方向；股票增删后会自动生成新的复盘缓存范围，不会继续使用旧股票集合。</p>
+              </div>
+              <button className="button button-dark" onClick={() => go("reviews")}>进入复盘</button>
+            </section>
           </div>
         )}
 
@@ -852,7 +948,7 @@ export function AStockApp() {
             <section className="review-scope">
               <div className="section-head compact">
                 <div><p className="eyebrow">本次范围</p><h2>当前关注的股票</h2></div>
-                <Pill tone="neutral">{watchItems.filter((item) => item.object_type === "stock").length} 只</Pill>
+                <div className="inline-actions"><Pill tone="neutral">{watchItems.filter((item) => item.object_type === "stock").length} 只</Pill><button className="text-button" onClick={() => go("watch")}>调整关注范围</button></div>
               </div>
               <div className="scope-chips">
                 {watchItems.filter((item) => item.object_type === "stock").map((item) => (
@@ -895,7 +991,7 @@ export function AStockApp() {
 
         {page === "status" && (
           <div className="page-stack narrow">
-            <section className="status-hero"><span className="status-orbit"><i /></span><div><Pill tone="green">真实数据限定</Pill><h2>只有真实数据才生成结果</h2><p>四个主要指数、关注股票快照和历史日线来自真实公开行情；未覆盖的数据只显示不可用。</p></div></section>
+            <section className="status-hero"><span className="status-orbit"><i /></span><div><Pill tone="green">真实数据限定</Pill><h2>只有真实数据才生成结果</h2><p>六个主要指数、关注股票快照和历史日线来自真实公开行情；未覆盖的数据只显示不可用。</p></div></section>
             <section className="status-list">{health.length ? health.map((item) => <article key={item.id}><span className={`health-dot health-${item.status}`} /><div><strong>{item.name}</strong><p>{item.message}</p></div><Pill tone={item.status === "healthy" || item.status === "ready" ? "green" : item.status.includes("config") ? "amber" : "neutral"}>{statusLabel(item.status)}</Pill></article>) : <Empty title="正在读取状态" detail="如果长时间没有结果，请刷新页面。" />}</section>
             <section className="panel"><div className="section-head compact"><div><p className="eyebrow">安全边界</p><h2>这个产品不会做什么</h2></div></div><ul className="safety-list"><li><span>01</span>不保存券商账号密码，不接账户，不自动下单。</li><li><span>02</span>密钥只在服务端环境变量，前端包和日志不包含真实 Token。</li><li><span>03</span>数据过期时停止生成正常行情结论，最多提醒一次系统异常。</li><li><span>04</span>不把阈值或复盘包装成买卖指令、收益保证或投资建议。</li></ul></section>
           </div>

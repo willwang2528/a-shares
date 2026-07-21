@@ -10,7 +10,6 @@ import {
   getHistoricalReviewCache,
   listWatchItems,
   saveHistoricalReviewCache,
-  seedWatchItems,
 } from "@/lib/storage";
 import { currentUserIdentity } from "@/lib/user";
 
@@ -50,7 +49,6 @@ export async function GET(request: Request) {
     const user = await currentUserIdentity();
     await ensureSchema(env.DB);
     await ensureUser(env.DB, user.id, user.email, user.displayName);
-    await seedWatchItems(env.DB, user.id);
     const stocks = (await listWatchItems(env.DB, user.id))
       .filter((item) => item.object_type === "stock")
       .slice(0, 20)

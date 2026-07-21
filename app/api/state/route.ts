@@ -6,7 +6,6 @@ import {
   ensureUser,
   loadDashboardState,
   saveSettings,
-  seedWatchItems,
 } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +22,6 @@ export async function GET() {
     const user = await currentUserIdentity();
     await ensureSchema(env.DB);
     await ensureUser(env.DB, user.id, user.email, user.displayName);
-    await seedWatchItems(env.DB, user.id);
     const state = await loadDashboardState(env.DB, user.id);
     return json({ ok: true, user: { displayName: user.displayName }, ...state });
   } catch {

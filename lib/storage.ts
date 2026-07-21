@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS, type AlertEvent, type DailyReview, type UserSettings } from "./domain";
 import type { HistoricalReviewResult } from "./historical-review";
+import type { MarketDailyReview } from "./daily-market-review";
 
 export type StoredWatchItem = {
   id: string;
@@ -97,6 +98,11 @@ export async function ensureSchema(db: D1Database) {
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       UNIQUE(user_id, trade_date, scope_key)
     )`,
+    `CREATE TABLE IF NOT EXISTS market_daily_reviews (
+      trade_date TEXT PRIMARY KEY, data_version TEXT NOT NULL, provider TEXT NOT NULL,
+      payload_json TEXT NOT NULL, fetched_at TEXT NOT NULL, created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS provider_health (
       provider_type TEXT NOT NULL, provider_name TEXT NOT NULL, status TEXT NOT NULL,
       message TEXT NOT NULL, checked_at TEXT NOT NULL, UNIQUE(provider_type, provider_name)
@@ -129,6 +135,10 @@ export async function ensureSchema(db: D1Database) {
         '"notification_channel":"browser"'
       )
       WHERE settings_json LIKE '%"notification_channel":"simulation"%'`,
+    `DELETE FROM watch_items
+      WHERE id LIKE 'watch-%-sector-metal'
+         OR id LIKE 'watch-%-601600'
+         OR id LIKE 'watch-%-000858'`,
   ];
   await db.batch(statements.map((statement) => db.prepare(statement)));
 }
@@ -191,35 +201,6 @@ export async function saveSettings(db: D1Database, userId: string, settings: Use
     .prepare("UPDATE user_settings SET settings_json = ?, updated_at = ? WHERE user_id = ?")
     .bind(JSON.stringify(settings), now, userId)
     .run();
-}
-
-export async function seedWatchItems(db: D1Database, userId: string) {
-  const count = await db.prepare("SELECT COUNT(*) AS count FROM watch_items WHERE user_id = ?").bind(userId).first<{ count: number }>();
-  if ((count?.count ?? 0) > 0) return;
-  const now = new Date().toISOString();
-  await db.batch([
-    db
-      .prepare(
-        `INSERT OR IGNORE INTO watch_items
-          (id, user_id, group_id, object_type, code, name, tag, cost_price, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(`watch-${userId}-sector-metal`, userId, null, "sector", "SW-801050", "有色金属", "watch", null, now, now),
-    db
-      .prepare(
-        `INSERT OR IGNORE INTO watch_items
-          (id, user_id, group_id, object_type, code, name, tag, cost_price, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(`watch-${userId}-601600`, userId, null, "stock", "601600.SH", "中国铝业", "holding", 7.86, now, now),
-    db
-      .prepare(
-        `INSERT OR IGNORE INTO watch_items
-          (id, user_id, group_id, object_type, code, name, tag, cost_price, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(`watch-${userId}-000858`, userId, null, "stock", "000858.SZ", "五粮液", "watch", null, now, now),
-  ]);
 }
 
 export async function listWatchItems(db: D1Database, userId: string) {
@@ -369,6 +350,93 @@ export async function saveHistoricalReviewCache(
       now,
     )
     .run();
+}
+
+export async function getLatestMarketDailyReview(
+  db: D1Database,
+  beforeTradeDate?: string,
+) {
+  const row = beforeTradeDate
+    ? await db
+        .prepare(
+          `SELECT payload_json FROM market_daily_reviews
+           WHERE trade_date < ? ORDER BY trade_date DESC LIMIT 1`,
+        )
+        .bind(beforeTradeDate)
+        .first<{ payload_json: string }>()
+    : await db
+        .prepare(
+          "SELECT payload_json FROM market_daily_reviews ORDER BY trade_date DESC LIMIT 1",
+        )
+        .first<{ payload_json: string }>();
+  if (!row) return null;
+  try {
+    return JSON.parse(row.payload_json) as MarketDailyReview;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveMarketDailyReview(
+  db: D1Database,
+  review: MarketDailyReview,
+) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO market_daily_reviews
+        (trade_date, data_version, provider, payload_json, fetched_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(trade_date) DO UPDATE SET
+         data_version = excluded.data_version,
+         provider = excluded.provider,
+         payload_json = excluded.payload_json,
+         fetched_at = excluded.fetched_at,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      review.tradeDate,
+      review.dataVersion,
+      review.provider,
+      JSON.stringify(review),
+      review.asOf,
+      now,
+      now,
+    )
+    .run();
+}
+
+export async function saveAlertEvents(
+  db: D1Database,
+  userId: string,
+  events: AlertEvent[],
+) {
+  if (!events.length) return;
+  const now = new Date().toISOString();
+  await db.batch(
+    events.map((event) =>
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO alert_events
+           (id, user_id, dedupe_key, level, object_type, object_code, title,
+            payload_json, data_time, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          userId,
+          event.id,
+          event.level,
+          event.objectType,
+          event.objectCode,
+          event.title,
+          JSON.stringify(event),
+          event.dataTime,
+          now,
+          now,
+        ),
+    ),
+  );
 }
 
 export async function acquireLease(db: D1Database, leaseKey: string, owner: string, seconds = 45) {

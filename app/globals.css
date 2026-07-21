@@ -137,6 +137,29 @@ p {
   gap: 3px;
 }
 
+.nav-group-label {
+  color: #77837c;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  padding: 8px 13px 5px;
+}
+
+.nav-group-secondary {
+  border-top: 1px solid #e2e6df;
+  margin-top: 12px;
+  padding-top: 15px;
+}
+
+.sidebar nav button.nav-secondary {
+  color: #8b948f;
+  font-weight: 600;
+}
+
+.sidebar nav button.nav-secondary:not(.active) > span {
+  opacity: 0.65;
+}
+
 .sidebar nav button {
   align-items: center;
   background: transparent;
@@ -387,6 +410,113 @@ main {
   gap: 10px;
   justify-content: center;
   min-height: 190px;
+}
+
+.market-review-summary,
+.market-review-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.market-review-summary h2,
+.market-review-checks h2 {
+  font-size: clamp(18px, 2vw, 26px);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.market-review-summary ul,
+.market-review-checks ol {
+  color: #526159;
+  line-height: 1.7;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.market-review-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.market-review-metrics span {
+  background: #f0f4ee;
+  border-radius: 10px;
+  padding: 11px;
+}
+
+.market-review-metrics small,
+.market-review-metrics strong {
+  display: block;
+}
+
+.market-review-metrics small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.market-review-metrics strong {
+  font-size: 17px;
+  margin-top: 4px;
+}
+
+.market-direction-list {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.market-direction-list > strong {
+  font-size: 12px;
+}
+
+.market-direction-list span {
+  background: #edf5ed;
+  border-radius: 9px;
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+}
+
+.market-direction-list.loss span {
+  background: #fff0ec;
+}
+
+.market-direction-list b {
+  font-size: 12px;
+}
+
+.market-direction-list small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.watch-review-link {
+  align-items: center;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+}
+
+.watch-review-link h2 {
+  font-size: 20px;
+  margin: 10px 0 6px;
+}
+
+.watch-review-link p {
+  color: var(--muted);
+  line-height: 1.65;
+  margin: 0;
+  max-width: 720px;
+}
+
+@media (max-width: 760px) {
+  .watch-review-link {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .coverage-panel h2 {
@@ -1920,7 +2050,33 @@ legend {
 .history-review-sections > div {
   background: #f3f5f0;
   border-radius: 13px;
+  border-top: 4px solid #778a7f;
   padding: 16px;
+}
+
+.history-review-sections > div:nth-child(1) {
+  background: #eef6ef;
+  border-top-color: #4e8d66;
+}
+
+.history-review-sections > div:nth-child(2) {
+  background: #fff6e6;
+  border-top-color: #d79632;
+}
+
+.history-review-sections > div:nth-child(3) {
+  background: #f3f3f1;
+  border-top-color: #8d918e;
+}
+
+.history-review-sections > div:nth-child(4) {
+  background: #eef3f8;
+  border-top-color: #557b9d;
+}
+
+.history-review-sections li {
+  line-height: 1.65;
+  margin-top: 8px;
 }
 
 .channel-list {

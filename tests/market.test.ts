@@ -19,7 +19,9 @@ test("parses real index values and provider timestamps", () => {
     quote("sh000001", 3764.15, -3.05, "20260717161402"),
     quote("sz399001", 13706.88, -5.4, "20260717161451"),
     quote("sz399006", 3428.63, -7.15, "20260717161406"),
+    quote("sh000688", 1188.42, -4.12, "20260717161407"),
     quote("sh000300", 4529.1, -3.6, "20260717161408"),
+    quote("sh000852", 6901.22, -4.35, "20260717161409"),
   ].join("\n");
   const snapshot = parseTencentQuoteResponse(
     raw,

@@ -223,6 +223,19 @@ export function summarizeHistoricalMovements(
     (left, right) => left.dayChangePct - right.dayChangePct,
   )[0];
 
+  const stockFacts = available.map((item) => {
+    const typed = item as HistoricalStockMovement & {
+      previousTradeDate: string;
+      previousClose: number;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number;
+    };
+    return `${typed.name}（${typed.code}）：${typed.previousTradeDate} 收盘 ${typed.previousClose.toFixed(2)} 元；当日开盘 ${typed.open.toFixed(2)} 元、最高 ${typed.high.toFixed(2)} 元、最低 ${typed.low.toFixed(2)} 元、收盘 ${typed.close.toFixed(2)} 元，成交量 ${Math.round(typed.volume).toLocaleString("zh-CN")}。`;
+  });
+
   const observations = [
     `开盘相对上一交易日收盘平均 ${fixed(averageGap)}；这只是价格缺口描述，不代表后续方向。`,
     `从开盘到收盘平均 ${fixed(averageIntraday)}；可用于观察开盘后走势是否延续，但不能据此给出买卖指令。`,
@@ -230,22 +243,41 @@ export function summarizeHistoricalMovements(
   if (Math.abs(averageGap) < 0.3) {
     observations.push("多数样本的平均开盘缺口较小，仍需逐只查看，不能把平均值当成每只股票的表现。");
   }
+  for (const item of available.slice(0, 6)) {
+    const sameDirection = Math.sign(item.openGapPct) === Math.sign(item.intradayPct);
+    observations.push(
+      sameDirection
+        ? `${item.name}的开盘缺口与开盘后变动方向一致；这只是当日价格轨迹，不代表之后仍会延续。`
+        : `${item.name}开盘后的方向与开盘缺口不同；这只说明当日价格方向发生变化。`,
+    );
+  }
+
+  const unavailable = items.filter((item) => item.status !== "available");
 
   return {
     headline: `${tradeDate} 共 ${available.length} 只股票有真实数据：${up} 只上涨、${down} 只下跌、${flat} 只基本持平。`,
     facts: [
       `样本全天平均变动 ${fixed(averageDay)}。`,
-      `表现相对较强的是 ${strongest.name}（${fixed(strongest.dayChangePct)}），相对较弱的是 ${weakest.name}（${fixed(weakest.dayChangePct)}）。`,
+      `本次选中股票中相对较强的是 ${strongest.name}（${fixed(strongest.dayChangePct)}），相对较弱的是 ${weakest.name}（${fixed(weakest.dayChangePct)}）。`,
       `开盘前基准统一使用上一交易日的前复权收盘价，开盘后使用当日 09:30 开盘价和收盘价。`,
+      ...stockFacts,
     ],
-    observations,
+    observations: [
+      ...observations,
+      "以上是数据提示，不是买入、卖出或持有建议。单日表现不能证明未来走势。",
+    ],
     unknowns: [
       "当前未接入公告、新闻和资金流等可靠历史原因数据，因此不推测上涨或下跌原因。",
       "公开历史源不提供可稳定回查的 09:25 集合竞价和完整分钟轨迹，本复盘不会把日线冒充分钟数据。",
+      ...(unavailable.length
+        ? [`${unavailable.map((item) => item.name).join("、")}没有可验证记录；在取得交易日历或停牌证据前，不判断具体原因。`]
+        : []),
     ],
     nextChecks: [
-      "继续观察各股票开盘缺口与开盘后变动是否方向一致。",
-      "继续观察相对较强或较弱对象是否只是单日现象。",
+      "下一交易日继续记录开盘价相对前收盘价的变化。",
+      "继续比较开盘后至收盘的方向，观察本次同向或反向现象是否重复。",
+      "继续记录最高价、最低价和成交量；只有数据源返回对应字段时才展示。",
+      "继续使用同一组关注股票作比较，避免因样本变化造成前后不可比。",
     ],
   };
 }
