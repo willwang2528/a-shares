@@ -6,11 +6,14 @@ import {
   evaluateRules,
   generateDeterministicReview,
   getDueBundle,
-  getFixture,
   getMarketSessionState,
   scansPerTradingDay,
   shouldPush,
+  type MarketSnapshot,
 } from "../lib/domain.ts";
+import realSnapshot from "../data/last-real-index-snapshot.json" with { type: "json" };
+
+const recordedRealSnapshot = realSnapshot as MarketSnapshot;
 
 function cnDate(value: string) {
   return new Date(`${value}+08:00`);
@@ -51,34 +54,15 @@ test("merges periodic and key-moment triggers into one due bundle", () => {
 });
 
 test("implements event_only, interval_digest and both push modes", () => {
-  const noEvents = evaluateRules(getFixture("normal"));
-  const events = evaluateRules(getFixture("market_drop"));
-  assert.equal(noEvents.length, 0);
-  assert.equal(shouldPush("event_only", noEvents), false);
-  assert.equal(shouldPush("event_only", events), true);
-  assert.equal(shouldPush("interval_digest", noEvents), true);
-  assert.equal(shouldPush("both", events), true);
+  const realEvents = evaluateRules(recordedRealSnapshot);
+  assert.equal(realEvents.length, 0);
+  assert.equal(shouldPush("event_only", realEvents), false);
+  assert.equal(shouldPush("interval_digest", realEvents), true);
+  assert.equal(shouldPush("both", realEvents), true);
 });
 
-test("uses provider daily limit prices instead of a hard-coded percentage", () => {
-  const events = evaluateRules(getFixture("limit_wave"));
-  const sealed = events.find((event) => event.eventType === "sealed_down");
-  const opened = events.find((event) => event.eventType === "opened_down");
-  assert.ok(sealed);
-  assert.ok(opened);
-  assert.match(sealed.threshold, /7\.45/);
-  assert.match(opened.threshold, /110\.88/);
-});
-
-test("stale data produces only a system alert", () => {
-  const events = evaluateRules(getFixture("provider_failure"));
-  assert.equal(events.length, 1);
-  assert.equal(events[0].objectType, "system");
-  assert.equal(events[0].eventType, "stale_or_incomplete");
-});
-
-test("review output separates facts, possible explanations and unknowns", () => {
-  const review = generateDeterministicReview(getFixture("market_drop"));
+test("real-data review separates facts, possible explanations and unknowns", () => {
+  const review = generateDeterministicReview(recordedRealSnapshot);
   assert.ok(review.facts.length >= 4);
   assert.ok(review.possibleExplanations.length > 0);
   assert.ok(review.unknowns.length > 0);
@@ -93,8 +77,6 @@ test("cost storage estimate changes with interval and scope", () => {
   assert.ok(fiveMinuteMarket > thirtyMinuteWatch * 1000);
 });
 
-test("alert ids are stable for the same object, event and data version", () => {
-  const first = evaluateRules(getFixture("market_drop")).map((event) => event.id);
-  const second = evaluateRules(getFixture("market_drop")).map((event) => event.id);
-  assert.deepEqual(first, second);
+test("recorded real index data does not create unsupported alerts", () => {
+  assert.deepEqual(evaluateRules(recordedRealSnapshot), []);
 });

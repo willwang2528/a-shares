@@ -200,7 +200,7 @@ export function summarizeHistoricalMovements(
   if (!available.length) {
     return {
       headline: `${tradeDate} 没有可用于复盘的真实股票日线数据。`,
-      facts: ["所有对象都明确标记为“没有数据”或“读取失败”，没有使用 Mock 补位。"],
+      facts: ["所有对象都明确标记为“没有数据”或“读取失败”，没有生成估算值。"],
       observations: ["数据不足时不生成走势判断。"],
       unknowns: ["无法确认当天价格表现，也无法判断变化原因。"],
       nextChecks: ["检查所选日期是否为交易日，并确认关注列表中已有股票。"],
@@ -267,7 +267,7 @@ export async function buildHistoricalReview(
           return {
             ...stock,
             status: "error" as const,
-            message: "真实历史行情读取失败，没有使用演示数据替代。",
+            message: "真实历史行情读取失败，没有生成估算数据。",
           };
         }
       }),

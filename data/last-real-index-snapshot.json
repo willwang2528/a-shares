@@ -1,5 +1,5 @@
 {
-  "fixtureId": "real_indices",
+  "dataVersion": "tencent-indices:2026-07-17T16:14:51+08:00",
   "dataMode": "experimental_real",
   "coverage": "indices_only",
   "asOf": "2026-07-17T16:14:51+08:00",

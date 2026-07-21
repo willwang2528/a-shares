@@ -7,7 +7,7 @@ import {
   summarizeHistoricalMovements,
 } from "../lib/historical-review.ts";
 
-const tencentFixture = JSON.stringify({
+const recordedTencentResponse = JSON.stringify({
   data: {
     sh601600: {
       qfqday: [
@@ -21,7 +21,7 @@ const tencentFixture = JSON.stringify({
 
 test("historical parser uses the real previous close, open and close fields", () => {
   const result = parseTencentHistoricalResponse(
-    tencentFixture,
+    recordedTencentResponse,
     { code: "601600.SH", name: "中国铝业" },
     "2026-07-17",
   );
@@ -40,7 +40,7 @@ test("historical parser uses the real previous close, open and close fields", ()
 
 test("historical parser reports no data instead of fabricating a non-trading day", () => {
   const result = parseTencentHistoricalResponse(
-    tencentFixture,
+    recordedTencentResponse,
     { code: "601600.SH", name: "中国铝业" },
     "2026-07-18",
   );
@@ -50,7 +50,7 @@ test("historical parser reports no data instead of fabricating a non-trading day
 
 test("deterministic summary separates facts from unknown causes", () => {
   const movement = parseTencentHistoricalResponse(
-    tencentFixture,
+    recordedTencentResponse,
     { code: "601600.SH", name: "中国铝业" },
     "2026-07-17",
   );

@@ -1,33 +1,26 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
 import "./globals.css";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const origin = `${protocol}://${host}`;
+export function generateMetadata(): Metadata {
   return {
-    title: "盘面守望｜A 股风险提醒与每日复盘",
-    description: "展示真实 A 股主要指数快照，并提供风险规则测试、任务设置、成本评估和每日复盘。",
-    applicationName: "盘面守望",
+    title: "Aria 监盘｜A 股真实数据监控与复盘",
+    description: "只使用真实 A 股行情数据展示主要指数、关注股票、预警与历史复盘。",
+    applicationName: "Aria 监盘",
     manifest: "/manifest.webmanifest",
     appleWebApp: {
       capable: true,
       statusBarStyle: "default",
-      title: "盘面守望",
+      title: "Aria 监盘",
     },
     openGraph: {
-      title: "盘面守望",
-      description: "A 股风险提醒与每日复盘",
-      images: [{ url: `${origin}/og.png`, width: 1536, height: 1024, alt: "盘面守望产品预览" }],
+      title: "Aria 监盘",
+      description: "A 股真实数据监控与复盘",
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: "盘面守望",
-      description: "A 股风险提醒与每日复盘",
-      images: [`${origin}/og.png`],
+      title: "Aria 监盘",
+      description: "A 股真实数据监控与复盘",
     },
   };
 }

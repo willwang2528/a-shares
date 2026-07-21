@@ -105,7 +105,7 @@
       "id": "light",
       "name": "轻量验证",
       "interval_minutes": 30,
-      "scope": "Mock 盘中 + 官方日线盘后",
+      "scope": "真实指数与关注股快照 + 真实日线复盘",
       "monthly_cny": 16.67,
       "annual_cny": 200,
       "included": ["Tushare 2000 积分档按年折月", "CloudBase 免费体验额度", "Server酱免费 5 条/日", "不调用大模型"],

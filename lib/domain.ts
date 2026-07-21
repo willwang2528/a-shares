@@ -22,7 +22,7 @@ export interface UserSettings {
   stock_drop_threshold: number;
   fast_drop_threshold: number;
   market_down_ratio_threshold: number;
-  notification_channel: "simulation" | "browser" | "serverchan" | "email";
+  notification_channel: "browser" | "serverchan" | "email";
 }
 
 export interface IndexQuote {
@@ -61,8 +61,8 @@ export interface StockQuote {
 }
 
 export interface MarketSnapshot {
-  fixtureId: string;
-  dataMode?: "mock" | "experimental_real";
+  dataVersion: string;
+  dataMode: "experimental_real";
   coverage?: "full" | "indices_only";
   asOf: string;
   provider: string;
@@ -157,7 +157,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   stock_drop_threshold: -5,
   fast_drop_threshold: -2,
   market_down_ratio_threshold: 65,
-  notification_channel: "simulation",
+  notification_channel: "browser",
 };
 
 const HOLIDAYS_2026 = new Set([
@@ -543,6 +543,9 @@ export function shouldPush(mode: PushMode, events: AlertEvent[]) {
 }
 
 export function generateDeterministicReview(snapshot: MarketSnapshot): DailyReview {
+  if (!snapshot.dataComplete) {
+    throw new Error("真实行情数据不完整，不能生成复盘结论。");
+  }
   if (snapshot.coverage === "indices_only") {
     const averageChange =
       snapshot.indices.reduce((total, index) => total + index.changePct, 0) /
@@ -594,7 +597,7 @@ export function generateDeterministicReview(snapshot: MarketSnapshot): DailyRevi
     possibleExplanations: [
       "仅可说明价格、成交和市场宽度同步走弱；若要解释政策、资金或新闻，需要接入带时间和来源的可靠资讯。",
     ],
-    unknowns: ["当前 Mock 数据未接入已验证新闻，无法确认价格变化的外部原因。"],
+    unknowns: ["当前尚未接入已验证新闻，无法确认价格变化的外部原因。"],
     nextWatch: [
       "下跌家数占比是否连续两个扫描周期高于 65%。",
       "跌停家数是否继续增加，已打开跌停的个股是否再次封住。",
@@ -605,79 +608,6 @@ export function generateDeterministicReview(snapshot: MarketSnapshot): DailyRevi
       : `数据不完整或过期；来源 ${snapshot.provider}；不生成正常结论。`,
     modelStatus: "not_used",
   };
-}
-
-const NORMAL_SNAPSHOT: MarketSnapshot = {
-  fixtureId: "normal",
-  dataMode: "mock",
-  coverage: "full",
-  asOf: "2026-07-17T14:30:00+08:00",
-  provider: "Mock Fixture（未接入真实行情）",
-  delayedMinutes: 0,
-  dataComplete: true,
-  indices: [
-    { code: "000001.SH", name: "上证指数", value: 3548.21, changePct: 0.36 },
-    { code: "399001.SZ", name: "深证成指", value: 10982.44, changePct: 0.51 },
-    { code: "399006.SZ", name: "创业板指", value: 2296.18, changePct: 0.22 },
-    { code: "000300.SH", name: "沪深 300", value: 3976.85, changePct: 0.41 },
-  ],
-  breadth: { up: 3042, down: 1978, flat: 201, limitUp: 52, limitDown: 9 },
-  sectors: [
-    { code: "SW-801050", name: "有色金属", source: "申万一级行业", memberCount: 134, changePct: 1.72, up: 92, down: 37, flat: 5 },
-    { code: "SW-801120", name: "食品饮料", source: "申万一级行业", memberCount: 118, changePct: -0.54, up: 41, down: 72, flat: 5 },
-  ],
-  stocks: [
-    { code: "601600.SH", name: "中国铝业", sector: "有色金属", current: 8.42, prevClose: 8.28, open: 8.3, changePct: 1.69, change5mPct: 0.2, volumeRatio: 1.3, limitUp: 9.11, limitDown: 7.45, limitState: "normal" },
-    { code: "000858.SZ", name: "五粮液", sector: "食品饮料", current: 122.6, prevClose: 123.2, open: 122.9, changePct: -0.49, change5mPct: -0.12, volumeRatio: 0.9, limitUp: 135.52, limitDown: 110.88, limitState: "normal" },
-  ],
-};
-
-const DROP_SNAPSHOT: MarketSnapshot = {
-  ...NORMAL_SNAPSHOT,
-  fixtureId: "market_drop",
-  indices: [
-    { code: "000001.SH", name: "上证指数", value: 3478.62, changePct: -2.18 },
-    { code: "399001.SZ", name: "深证成指", value: 10621.19, changePct: -3.04 },
-    { code: "399006.SZ", name: "创业板指", value: 2198.4, changePct: -3.86 },
-    { code: "000300.SH", name: "沪深 300", value: 3861.22, changePct: -2.51 },
-  ],
-  breadth: { up: 648, down: 4489, flat: 84, limitUp: 21, limitDown: 87 },
-  sectors: [
-    { code: "SW-801050", name: "有色金属", source: "申万一级行业", memberCount: 134, changePct: -3.42, up: 16, down: 115, flat: 3 },
-    { code: "SW-801120", name: "食品饮料", source: "申万一级行业", memberCount: 118, changePct: -2.31, up: 18, down: 96, flat: 4 },
-  ],
-  stocks: [
-    { code: "601600.SH", name: "中国铝业", sector: "有色金属", current: 7.49, prevClose: 8.28, open: 7.98, changePct: -9.54, change5mPct: -2.84, volumeRatio: 3.6, limitUp: 9.11, limitDown: 7.45, limitState: "near_down" },
-    { code: "000858.SZ", name: "五粮液", sector: "食品饮料", current: 116.1, prevClose: 123.2, open: 119.1, changePct: -5.76, change5mPct: -2.16, volumeRatio: 2.8, limitUp: 135.52, limitDown: 110.88, limitState: "normal" },
-    { code: "300750.SZ", name: "宁德时代", sector: "电力设备", current: 228.4, prevClose: 238.5, open: 230.4, changePct: -4.23, change5mPct: -1.08, volumeRatio: 1.7, limitUp: 286.2, limitDown: 190.8, limitState: "normal" },
-  ],
-};
-
-const LIMIT_SNAPSHOT: MarketSnapshot = {
-  ...DROP_SNAPSHOT,
-  fixtureId: "limit_wave",
-  stocks: [
-    { ...DROP_SNAPSHOT.stocks[0], current: 7.45, changePct: -10.02, limitState: "sealed_down" },
-    { ...DROP_SNAPSHOT.stocks[1], current: 111.3, changePct: -9.66, change5mPct: 0.62, limitState: "opened_down" },
-  ],
-};
-
-const FAILURE_SNAPSHOT: MarketSnapshot = {
-  ...DROP_SNAPSHOT,
-  fixtureId: "provider_failure",
-  delayedMinutes: 18,
-  dataComplete: false,
-};
-
-export const FIXTURES: Record<string, MarketSnapshot> = {
-  normal: NORMAL_SNAPSHOT,
-  market_drop: DROP_SNAPSHOT,
-  limit_wave: LIMIT_SNAPSHOT,
-  provider_failure: FAILURE_SNAPSHOT,
-};
-
-export function getFixture(id: string): MarketSnapshot {
-  return structuredClone(FIXTURES[id] ?? DROP_SNAPSHOT);
 }
 
 export function scansPerTradingDay(interval: number) {

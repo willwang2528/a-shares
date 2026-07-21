@@ -3,7 +3,7 @@ import { getChatGPTUser } from "@/app/chatgpt-auth";
 export async function currentUserIdentity() {
   const user = await getChatGPTUser();
   if (!user) {
-    return { id: "local-demo", email: undefined, displayName: "本机体验用户" };
+    return { id: "local-user", email: undefined, displayName: "本机用户" };
   }
   const bytes = new TextEncoder().encode(user.email.toLowerCase());
   const digest = await crypto.subtle.digest("SHA-256", bytes);

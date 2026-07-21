@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     return Response.json(
       {
         ok: false,
-        message: "真实自选股行情暂时读取失败，不会用演示涨跌幅替代。",
+        message: "真实自选股行情暂时读取失败，已标记为没有数据。",
       },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );

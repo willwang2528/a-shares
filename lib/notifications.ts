@@ -1,6 +1,6 @@
 export interface NotificationResult {
-  channel: "simulation" | "serverchan" | "email";
-  status: "sent" | "simulated" | "needs_config" | "failed";
+  channel: "browser" | "serverchan" | "email";
+  status: "sent" | "needs_config" | "failed";
   message: string;
 }
 
@@ -9,13 +9,17 @@ export interface NotificationProvider {
   send(title: string, body: string, url?: string): Promise<NotificationResult>;
 }
 
-class SimulationProvider implements NotificationProvider {
-  name = "simulation";
-  async send() {
+class UnavailableProvider implements NotificationProvider {
+  name = "unavailable";
+  constructor(private readonly channel: NotificationResult["channel"]) {}
+  async send(): Promise<NotificationResult> {
     return {
-      channel: "simulation" as const,
-      status: "simulated" as const,
-      message: "已写入模拟发送日志；未向外部渠道发送。",
+      channel: this.channel,
+      status: "needs_config",
+      message:
+        this.channel === "browser"
+          ? "浏览器通知需要在当前设备上点击‘测试本机通知’。"
+          : "当前真实通知渠道尚未配置服务端密钥。",
     };
   }
 }
@@ -79,5 +83,6 @@ export function getNotificationProvider(env: Record<string, string | undefined>,
   if (preferred === "email" && env.RESEND_API_KEY && env.NOTIFICATION_EMAIL && env.NOTIFICATION_FROM) {
     return new EmailProvider(env.RESEND_API_KEY, env.NOTIFICATION_EMAIL, env.NOTIFICATION_FROM);
   }
-  return new SimulationProvider();
+  const channel = preferred === "email" || preferred === "serverchan" ? preferred : "browser";
+  return new UnavailableProvider(channel);
 }

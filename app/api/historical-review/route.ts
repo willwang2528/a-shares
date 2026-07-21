@@ -100,7 +100,7 @@ export async function GET(request: Request) {
     return Response.json(
       {
         ok: false,
-        message: "真实历史行情读取失败；页面不会使用 Mock 数据替代。",
+        message: "真实历史行情读取失败；本次不生成复盘结果。",
       },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );

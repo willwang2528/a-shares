@@ -14,7 +14,7 @@ function quote(variable: string, value: number, changePct: number, time: string)
   return `v_${variable}="${fields.join("~")}";`;
 }
 
-test("parses real index values and provider timestamps without using Mock", () => {
+test("parses real index values and provider timestamps", () => {
   const raw = [
     quote("sh000001", 3764.15, -3.05, "20260717161402"),
     quote("sz399001", 13706.88, -5.4, "20260717161451"),
@@ -25,14 +25,13 @@ test("parses real index values and provider timestamps without using Mock", () =
     raw,
     new Date("2026-07-18T10:00:00+08:00"),
   );
-  assert.equal(snapshot.fixtureId, "real_indices");
+  assert.equal(snapshot.dataVersion, "tencent-indices:2026-07-17T16:14:51+08:00");
   assert.equal(snapshot.dataMode, "experimental_real");
   assert.equal(snapshot.coverage, "indices_only");
   assert.equal(snapshot.asOf, "2026-07-17T16:14:51+08:00");
   assert.equal(snapshot.indices[0].value, 3764.15);
   assert.equal(snapshot.indices[2].changePct, -7.15);
   assert.match(snapshot.provider, /真实数据·实验源/);
-  assert.doesNotMatch(snapshot.provider, /Mock/);
   assert.equal(snapshot.dataComplete, true);
   assert.equal(evaluateRules(snapshot).length, 0);
   const review = generateDeterministicReview(snapshot);

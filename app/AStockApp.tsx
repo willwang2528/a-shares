@@ -7,7 +7,6 @@ import {
   DEFAULT_SETTINGS,
   estimateStorageMb,
   evaluateRules,
-  getFixture,
   getMarketSessionState,
   highestRisk,
   nextTaskLabel,
@@ -156,11 +155,10 @@ function Empty({ title, detail }: { title: string; detail: string }) {
 export function AStockApp() {
   const [page, setPage] = useState<PageId>("home");
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
-  const [fixtureId, setFixtureId] = useState("market_drop");
   const [snapshot, setSnapshot] = useState<MarketSnapshot>(
     () => lastRealIndexSnapshot as MarketSnapshot,
   );
-  const [dataMode, setDataMode] = useState<"real" | "cached_real" | "demo">(
+  const [dataMode, setDataMode] = useState<"real" | "cached_real">(
     "cached_real",
   );
   const [marketLoading, setMarketLoading] = useState(true);
@@ -193,7 +191,6 @@ export function AStockApp() {
   const [historicalError, setHistoricalError] = useState<string | null>(null);
 
   const currentAlerts = useMemo(() => evaluateRules(snapshot, settings), [snapshot, settings]);
-  const isReal = dataMode !== "demo";
   const risk = highestRisk(currentAlerts);
   const riskInfo = riskCopy(risk);
   const session = getMarketSessionState(new Date());
@@ -211,9 +208,9 @@ export function AStockApp() {
         if (data.settings) setSettings(data.settings);
         if (Array.isArray(data.alerts) && data.alerts.length) setAlerts(data.alerts);
         if (Array.isArray(data.watches)) setWatchItems(data.watches);
-        setSaveState(ok ? "已连接云端保存" : "当前为会话内演示配置");
+        setSaveState(ok ? "已连接云端保存" : "当前使用会话内默认设置");
       })
-      .catch(() => setSaveState("当前为会话内演示配置"));
+      .catch(() => setSaveState("当前使用会话内默认设置"));
     fetch("/api/health", { cache: "no-store" })
       .then(readApiData)
       .then((data) => setHealth(data.services ?? []))
@@ -264,7 +261,7 @@ export function AStockApp() {
       .catch(() => {
         if (ignored) return;
         setStockQuotes({});
-        setWatchQuoteError("真实股票行情暂时读取失败；没有使用演示涨跌幅替代。");
+        setWatchQuoteError("真实股票行情暂时读取失败；已标记为没有数据。");
       });
     return () => {
       ignored = true;
@@ -284,7 +281,7 @@ export function AStockApp() {
       setToast(`真实指数已更新：${data.snapshot.asOf.slice(0, 16).replace("T", " ")}`);
     } catch (error) {
       setMarketError(error instanceof Error ? error.message : "真实指数读取失败。");
-      setToast("真实指数读取失败；页面不会用 Mock 冒充真实行情。");
+      setToast("真实指数读取失败；已停止生成新的行情结论。");
     } finally {
       setMarketLoading(false);
     }
@@ -328,7 +325,6 @@ export function AStockApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type,
-          fixtureId: dataMode === "demo" ? fixtureId : undefined,
           force: true,
         }),
       });
@@ -338,11 +334,7 @@ export function AStockApp() {
         const nextAlerts = result.payload?.events ?? currentAlerts;
         if (result.payload?.snapshot) setSnapshot(result.payload.snapshot);
         setAlerts(nextAlerts);
-        setToast(
-          isReal
-            ? `真实指数扫描完成；当前覆盖不足，未运行全市场风险规则。`
-            : `Mock 扫描完成：发现 ${nextAlerts.length} 条事件。`,
-        );
+        setToast("真实指数扫描完成；当前覆盖不足，未运行全市场风险规则。");
       } else {
         setToast(result.payload?.delivery?.message ?? "测试通知已写入日志。");
       }
@@ -383,7 +375,7 @@ export function AStockApp() {
       setHistoricalError(
         error instanceof Error
           ? error.message
-          : "真实历史数据读取失败；没有使用演示数据替代。",
+          : "真实历史数据读取失败；本次不生成复盘。",
       );
     } finally {
       setHistoricalLoading(false);
@@ -401,7 +393,7 @@ export function AStockApp() {
       return;
     }
     const registration = await navigator.serviceWorker.ready;
-    await registration.showNotification("盘面守望测试通知", {
+    await registration.showNotification("Aria 监盘测试通知", {
       body: "如果你看到这条消息，说明这台设备的浏览器通知可用。",
       tag: "market-watch-test",
     });
@@ -510,8 +502,8 @@ export function AStockApp() {
     <div className="app-shell">
       <aside className="sidebar" aria-label="主要导航">
         <button className="brand" onClick={() => go("home")} aria-label="回到首页">
-          <span className="brand-mark">守</span>
-          <span><strong>盘面守望</strong><small>A 股风险提醒</small></span>
+          <span className="brand-mark">A</span>
+          <span><strong>Aria 监盘</strong><small>A 股真实数据提醒</small></span>
         </button>
         <nav>
           {NAV.map((item) => (
@@ -527,14 +519,10 @@ export function AStockApp() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <Pill tone={isReal ? "green" : "amber"}>
-            {dataMode === "real" ? "真实指数·实验" : dataMode === "cached_real" ? "真实指数·上次成功" : "Mock 演示"}
+          <Pill tone="green">
+            {dataMode === "real" ? "真实指数·实验源" : "真实指数·上次成功"}
           </Pill>
-          <p>
-            {isReal
-              ? "主要指数来自公开行情页面；完整全市场数据仍待正式授权。"
-              : "当前数据仅用于测试，不代表真实市场。"}
-          </p>
+          <p>只展示真实行情；数据缺失时明确标记不可用。</p>
         </div>
       </aside>
 
@@ -559,42 +547,30 @@ export function AStockApp() {
                 <div className="hero-kicker">
                   <span className="risk-icon">{riskInfo.icon}</span>
                   <span>
-                    {isReal ? "最近交易日真实快照" : "Mock 测试场景"} ·{" "}
+                    最近交易日真实快照 ·{" "}
                     {snapshot.asOf.slice(0, 16).replace("T", " ")}
                   </span>
                 </div>
                 <h2>
-                  {isReal
-                    ? marketLoading
-                      ? "正在检查行情更新"
-                      : "真实指数已更新"
-                    : `盘面${riskInfo.label}`}
+                  {marketLoading ? "正在检查行情更新" : "真实指数已更新"}
                 </h2>
-                <p>
-                  {isReal
-                    ? "当前真实数据覆盖四个主要指数。市场宽度、板块和个股尚未接入正式授权数据，因此不生成完整风险结论。"
-                    : `${riskInfo.detail}。当前是 Mock 演示数据，只用于验证规则，不代表真实市场。`}
-                </p>
+                <p>当前真实数据覆盖四个主要指数和已关注股票。市场宽度、行业成分和涨跌停仍缺少正式数据，所以不生成相关结论。</p>
                 {marketError ? <p className="source-warning">{marketError}</p> : null}
                 <div className="hero-actions">
                   <button className="button button-dark" onClick={() => refreshRealMarket()} disabled={marketLoading}>
                     {marketLoading ? "正在更新…" : "刷新真实数据"}
                   </button>
-                  <button className="button button-ghost" onClick={() => go(isReal ? "status" : "alerts")}>
-                    {isReal ? "查看覆盖说明" : "查看触发依据"}
+                  <button className="button button-ghost" onClick={() => go("status")}>
+                    查看覆盖说明
                   </button>
                 </div>
               </div>
               <div
                 className="breadth-ring"
-                aria-label={isReal ? "四个真实主要指数" : `下跌 ${snapshot.breadth.down} 家`}
+                aria-label="四个真实主要指数"
               >
-                <strong>
-                  {isReal
-                    ? snapshot.indices.length
-                    : `${Math.round((snapshot.breadth.down / (snapshot.breadth.up + snapshot.breadth.down + snapshot.breadth.flat)) * 100)}%`}
-                </strong>
-                <span>{isReal ? "真实指数" : "股票下跌"}</span>
+                <strong>{snapshot.indices.length}</strong>
+                <span>真实指数</span>
               </div>
             </section>
 
@@ -608,7 +584,7 @@ export function AStockApp() {
                 <div><p className="eyebrow">市场整体</p><h2>主要指数</h2></div>
                 <span className="data-time">
                   {snapshot.asOf.slice(0, 16).replace("T", " ")} ·{" "}
-                  {dataMode === "real" ? "真实数据·实验源" : dataMode === "cached_real" ? "真实数据·上次成功" : "Mock"}
+                  {dataMode === "real" ? "真实数据·实验源" : "真实数据·上次成功"}
                 </span>
               </div>
               <div className="index-grid">
@@ -624,78 +600,18 @@ export function AStockApp() {
               </div>
             </section>
 
-            {isReal ? (
-              <section className="two-column">
+            <section className="two-column">
                 <div className="panel coverage-panel">
                   <Pill tone="amber">尚未覆盖</Pill>
                   <h2>市场宽度与涨跌停</h2>
-                  <p>公开指数快照不包含全市场上涨、下跌、涨停和跌停家数。正式数据接入前，这里不显示 Mock 数字，也不触发相关规则。</p>
+                  <p>公开指数快照不包含全市场上涨、下跌、涨停和跌停家数。正式数据接入前，这里只显示“尚未覆盖”，也不触发相关规则。</p>
                 </div>
                 <div className="panel coverage-panel">
                   <Pill tone="amber">尚未覆盖</Pill>
-                  <h2>板块与自选股</h2>
-                  <p>板块成分、个股行情和数据源当日涨跌停价仍需正式授权。当前关注对象会保留，但不会混入演示价格。</p>
+                  <h2>行业成分与当日涨跌停价</h2>
+                  <p>自选股价格已读取真实快照；行业成分、行业涨跌幅和个股当日涨跌停价尚无可用数据。</p>
                 </div>
-              </section>
-            ) : (
-            <section className="two-column">
-              <div>
-                <div className="section-head compact">
-                  <div><p className="eyebrow">市场宽度</p><h2>今天有多弱？</h2></div>
-                </div>
-                <div className="breadth-card">
-                  <div className="breadth-bar" aria-label="上涨下跌家数比例">
-                    <i style={{ width: `${(snapshot.breadth.up / 5221) * 100}%` }} />
-                    <b style={{ width: `${(snapshot.breadth.down / 5221) * 100}%` }} />
-                  </div>
-                  <div className="breadth-numbers">
-                    <span><i className="dot dot-up" />上涨<strong>{snapshot.breadth.up}</strong></span>
-                    <span><i className="dot dot-down" />下跌<strong>{snapshot.breadth.down}</strong></span>
-                    <span><i className="dot dot-flat" />平盘<strong>{snapshot.breadth.flat}</strong></span>
-                  </div>
-                  <div className="limit-row">
-                    <span>涨停 <b className="up">{snapshot.breadth.limitUp}</b></span>
-                    <span>跌停 <b className="down">{snapshot.breadth.limitDown}</b></span>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <div className="section-head compact">
-                  <div><p className="eyebrow">三层关注</p><h2>板块与自选</h2></div>
-                  <button className="text-button" onClick={() => go("watch")}>管理</button>
-                </div>
-                <div className="watch-list">
-                  {watchItems.length ? watchItems.slice(0, 3).map((item) => {
-                    const quote = stockQuotes[item.code];
-                    return (
-                      <article key={item.id}>
-                        <span className={`object-icon ${item.object_type === "stock" ? "stock" : ""}`}>
-                          {item.object_type === "stock" ? "股" : "板"}
-                        </span>
-                        <div>
-                          <strong>{item.name}</strong>
-                          <small>
-                            {item.code} · {item.tag === "holding" ? "持有" : "仅关注"}
-                          </small>
-                        </div>
-                        {quote ? (
-                          <b className={quote.changePct >= 0 ? "up" : "down"}>
-                            {signed(quote.changePct)}
-                          </b>
-                        ) : (
-                          <b className="quote-pending">
-                            {item.object_type === "sector" ? "行业分类" : "读取中"}
-                          </b>
-                        )}
-                      </article>
-                    );
-                  }) : (
-                    <Empty title="还没有关注对象" detail="到关注页搜索板块或股票，选择后会显示在这里。" />
-                  )}
-                </div>
-              </div>
             </section>
-            )}
 
             <section>
               <div className="section-head">
@@ -703,7 +619,7 @@ export function AStockApp() {
                 <button className="text-button" onClick={() => go("alerts")}>全部 {currentAlerts.length} 条</button>
               </div>
               <div className="alert-list">
-                {currentAlerts.length ? currentAlerts.slice(0, 3).map((event) => <AlertCard key={event.id} event={event} />) : <Empty title="未运行完整风险判断" detail={isReal ? "真实数据当前只覆盖指数；需要全市场、板块和个股授权数据后才能运行完整规则。" : "当前 Mock 场景没有事件达到阈值。"} />}
+                {currentAlerts.length ? currentAlerts.slice(0, 3).map((event) => <AlertCard key={event.id} event={event} />) : <Empty title="暂无可生成的真实预警" detail="当前真实数据覆盖不足；未覆盖的规则不会生成预警。" />}
               </div>
             </section>
           </div>
@@ -881,7 +797,7 @@ export function AStockApp() {
           <div className="page-stack">
             <section className="toolbar">
               <div className="filter-tabs">{(["all", "danger", "warning", "notice"] as const).map((level) => <button key={level} className={alertLevel === level ? "active" : ""} onClick={() => setAlertLevel(level)}>{level === "all" ? "全部" : level === "danger" ? "高风险" : level === "warning" ? "需留意" : "一般"}</button>)}</div>
-              <label className="scenario-select"><span>Mock 测试场景</span><select value={fixtureId} onChange={(event) => { const next = getFixture(event.target.value); setFixtureId(event.target.value); setSnapshot(next); setDataMode("demo"); setAlerts(evaluateRules(next, settings)); }}><option value="market_drop">普通交易日大跌</option><option value="limit_wave">跌停封住 / 打开</option><option value="normal">无异常交易日</option><option value="provider_failure">行情源故障</option></select></label>
+              <Pill tone="green">只显示真实数据生成的记录</Pill>
             </section>
             <section className="summary-strip"><div><strong>{visibleAlerts.length}</strong><span>条符合筛选</span></div><div><strong>{visibleAlerts.filter((event) => event.level === "danger").length}</strong><span>条高风险</span></div><div><strong>1</strong><span>批合并结果</span></div><button className="button button-dark" onClick={() => run("scan")} disabled={running === "scan"}>{running === "scan" ? "正在扫描…" : "运行一次扫描"}</button></section>
             <section className="alert-list">{visibleAlerts.length ? visibleAlerts.map((event) => <AlertCard key={event.id} event={event} expanded />) : <Empty title="当前筛选没有预警" detail="这不代表没有市场风险，只表示没有事件达到当前规则阈值。" />}</section>
@@ -947,7 +863,7 @@ export function AStockApp() {
             {historicalLoading ? (
               <Empty title="正在读取真实历史行情" detail="首次读取会访问公开行情页面；同一天、同一组股票再次查询会优先使用云端缓存。" />
             ) : historicalError ? (
-              <Empty title="没有数据" detail={`${historicalError} 页面没有使用 Mock 数据补位。`} />
+              <Empty title="没有数据" detail={`${historicalError} 页面不会生成估算结果。`} />
             ) : historicalReview ? (
               <HistoricalReviewDocument response={historicalReview} />
             ) : (
@@ -963,9 +879,8 @@ export function AStockApp() {
               <ChannelCard id="browser" title="本机浏览器通知" badge="无需账号" description="点击测试后，这台设备会弹出系统通知；它不是后台 Web Push。" selected={settings.notification_channel === "browser"} onSelect={() => patchSettings({ notification_channel: "browser" })} action={<button className="button button-light" onClick={testBrowserNotification}>测试本机通知</button>} />
               <ChannelCard id="serverchan" title="Server酱 · 个人微信" badge="推荐" description="微信扫码开通，服务端保存 SendKey。免费版每天最多 5 条。" selected={settings.notification_channel === "serverchan"} onSelect={() => patchSettings({ notification_channel: "serverchan" })} action={<Pill tone="amber">尚未配置 Secret</Pill>} />
               <ChannelCard id="email" title="邮件" badge="备用" description="支持 Resend；需要 API Key、发件域名和收件邮箱。" selected={settings.notification_channel === "email"} onSelect={() => patchSettings({ notification_channel: "email" })} action={<Pill tone="neutral">尚未配置 Secret</Pill>} />
-              <ChannelCard id="simulation" title="模拟发送日志" badge="当前可用" description="不会发到外部，只验证合并、去重、重试和发送历史。" selected={settings.notification_channel === "simulation"} onSelect={() => patchSettings({ notification_channel: "simulation" })} action={<Pill tone="green">已就绪</Pill>} />
             </section>
-            <div className="save-bar"><div><strong>{saveState}</strong><span>测试不会绕过任务总开关</span></div><div className="inline-actions"><button className="button button-light" onClick={() => run("test_notification")} disabled={running === "test_notification"}>{running === "test_notification" ? "测试中…" : "测试当前服务端渠道"}</button><button className="button button-dark" onClick={saveSettings}>保存渠道</button></div></div>
+            <div className="save-bar"><div><strong>{saveState}</strong><span>只记录真实渠道的返回状态</span></div><div className="inline-actions">{settings.notification_channel !== "browser" ? <button className="button button-light" onClick={() => run("test_notification")} disabled={running === "test_notification"}>{running === "test_notification" ? "测试中…" : "测试当前服务端渠道"}</button> : null}<button className="button button-dark" onClick={saveSettings}>保存渠道</button></div></div>
           </div>
         )}
 
@@ -980,7 +895,7 @@ export function AStockApp() {
 
         {page === "status" && (
           <div className="page-stack narrow">
-            <section className="status-hero"><span className="status-orbit"><i /></span><div><Pill tone="green">真实指数已接通</Pill><h2>真实数据优先，Mock 只做测试</h2><p>四个主要指数使用真实公开行情快照；完整市场、板块和个股仍等待正式授权，不会与 Mock 混合。</p></div></section>
+            <section className="status-hero"><span className="status-orbit"><i /></span><div><Pill tone="green">真实数据限定</Pill><h2>只有真实数据才生成结果</h2><p>四个主要指数、关注股票快照和历史日线来自真实公开行情；未覆盖的数据只显示不可用。</p></div></section>
             <section className="status-list">{health.length ? health.map((item) => <article key={item.id}><span className={`health-dot health-${item.status}`} /><div><strong>{item.name}</strong><p>{item.message}</p></div><Pill tone={item.status === "healthy" || item.status === "ready" ? "green" : item.status.includes("config") ? "amber" : "neutral"}>{statusLabel(item.status)}</Pill></article>) : <Empty title="正在读取状态" detail="如果长时间没有结果，请刷新页面。" />}</section>
             <section className="panel"><div className="section-head compact"><div><p className="eyebrow">安全边界</p><h2>这个产品不会做什么</h2></div></div><ul className="safety-list"><li><span>01</span>不保存券商账号密码，不接账户，不自动下单。</li><li><span>02</span>密钥只在服务端环境变量，前端包和日志不包含真实 Token。</li><li><span>03</span>数据过期时停止生成正常行情结论，最多提醒一次系统异常。</li><li><span>04</span>不把阈值或复盘包装成买卖指令、收益保证或投资建议。</li></ul></section>
           </div>
@@ -998,7 +913,7 @@ export function AStockApp() {
 }
 
 function statusLabel(status: string) {
-  const labels: Record<string, string> = { healthy: "正常", ready: "已就绪", experimental: "真实·实验", mock: "Mock", degraded: "已降级", simulation: "模拟", needs_config: "待配置", configured_unverified: "待验证", failed: "异常" };
+  const labels: Record<string, string> = { healthy: "正常", ready: "已就绪", experimental: "真实·实验", degraded: "已降级", needs_config: "待配置", configured_unverified: "待验证", failed: "异常" };
   return labels[status] ?? status;
 }
 
@@ -1052,7 +967,7 @@ function WatchObject({
       ) : (
         <div className="object-quote pending">
           <strong>真实行情读取中</strong>
-          <small>读取失败时不会显示演示价格</small>
+          <small>读取失败时明确显示没有数据</small>
         </div>
       )}
       <div className="object-actions">

@@ -110,6 +110,25 @@ export async function ensureSchema(db: D1Database) {
       assumptions_json TEXT NOT NULL, monthly_total REAL NOT NULL, annual_total REAL NOT NULL,
       currency TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`,
+    `DELETE FROM alert_events
+      WHERE lower(payload_json) LIKE '%mock%'
+        OR lower(payload_json) LIKE '%fixture%'`,
+    `DELETE FROM daily_reviews
+      WHERE lower(report_json) LIKE '%mock%' OR lower(report_json) LIKE '%fixture%'`,
+    `DELETE FROM quote_snapshots
+      WHERE lower(provider) LIKE '%mock%' OR lower(payload_json) LIKE '%mock%'
+        OR lower(payload_json) LIKE '%fixture%'`,
+    `DELETE FROM scheduled_job_runs
+      WHERE lower(trigger_json) LIKE '%fixture%'`,
+    `DELETE FROM notification_deliveries
+      WHERE channel = 'simulation' OR status = 'simulated'`,
+    `UPDATE user_settings
+      SET settings_json = replace(
+        settings_json,
+        '"notification_channel":"simulation"',
+        '"notification_channel":"browser"'
+      )
+      WHERE settings_json LIKE '%"notification_channel":"simulation"%'`,
   ];
   await db.batch(statements.map((statement) => db.prepare(statement)));
 }
@@ -142,8 +161,22 @@ export async function loadDashboardState(db: D1Database, userId: string) {
     db.prepare("SELECT * FROM notification_deliveries WHERE user_id = ? ORDER BY created_at DESC LIMIT 12").bind(userId).all(),
     db.prepare("SELECT * FROM watch_items WHERE user_id = ? ORDER BY created_at ASC").bind(userId).all(),
   ]);
+  const storedSettings = settingsRow
+    ? (JSON.parse(settingsRow.settings_json) as Partial<UserSettings> & {
+        notification_channel?: string;
+      })
+    : {};
+  const notificationChannel = ["browser", "serverchan", "email"].includes(
+    storedSettings.notification_channel ?? "",
+  )
+    ? (storedSettings.notification_channel as UserSettings["notification_channel"])
+    : "browser";
   return {
-    settings: settingsRow ? (JSON.parse(settingsRow.settings_json) as UserSettings) : DEFAULT_SETTINGS,
+    settings: {
+      ...DEFAULT_SETTINGS,
+      ...storedSettings,
+      notification_channel: notificationChannel,
+    },
     alerts: alerts.results.map((row) => JSON.parse(row.payload_json) as AlertEvent),
     reviews: reviews.results.map((row) => JSON.parse(row.report_json) as DailyReview),
     jobs: jobs.results,

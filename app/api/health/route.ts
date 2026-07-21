@@ -25,7 +25,7 @@ export async function GET() {
         id: "market",
         name: "行情源",
         status: "failed",
-        message: "真实指数读取失败；系统不会自动改成未标注的 Mock 数据",
+        message: "真实指数读取失败；已停止生成行情结论",
       };
     }
   }
@@ -55,8 +55,8 @@ export async function GET() {
         {
           id: "notification",
           name: "外部通知",
-          status: runtime.SERVERCHAN_SENDKEY || runtime.RESEND_API_KEY ? "configured_unverified" : "simulation",
-          message: runtime.SERVERCHAN_SENDKEY || runtime.RESEND_API_KEY ? "服务端凭据已配置，等待用户测试接收" : "外部凭据未配置，先写入模拟发送日志",
+          status: runtime.SERVERCHAN_SENDKEY || runtime.RESEND_API_KEY ? "configured_unverified" : "needs_config",
+          message: runtime.SERVERCHAN_SENDKEY || runtime.RESEND_API_KEY ? "服务端凭据已配置，等待用户测试接收" : "外部通知凭据未配置；不会记录成已发送",
         },
       ],
     },

@@ -2,7 +2,6 @@ import {
   DEFAULT_SETTINGS,
   evaluateRules,
   generateDeterministicReview,
-  getFixture,
   shouldPush,
   type UserSettings,
 } from "./domain";
@@ -13,7 +12,6 @@ import { getNotificationProvider } from "./notifications";
 interface JobInput {
   userId: string;
   type: "scan" | "review" | "test_notification";
-  fixtureId?: string;
   origin?: string;
   forceId?: string;
 }
@@ -35,40 +33,56 @@ export async function executeJob(
   const now = new Date().toISOString();
   const state = await loadDashboardState(db, input.userId);
   const settings = (state.settings ?? DEFAULT_SETTINGS) as UserSettings;
-  const snapshot = input.fixtureId
-    ? getFixture(input.fixtureId)
-    : await fetchExperimentalRealSnapshot();
-  const tradeDate = snapshot.asOf.slice(0, 10);
+  const snapshot =
+    input.type === "test_notification"
+      ? null
+      : await fetchExperimentalRealSnapshot();
+  const tradeDate = snapshot?.asOf.slice(0, 10);
   const idempotencyKey =
     input.forceId ??
     (input.type === "review"
       ? `${input.userId}:daily_review:${tradeDate}`
-      : `${input.userId}:${input.type}:${snapshot.fixtureId}:${snapshot.asOf}`);
+      : snapshot
+        ? `${input.userId}:${input.type}:${snapshot.dataVersion}`
+        : `${input.userId}:test_notification:${now}`);
   const runId = crypto.randomUUID();
-  await db
-    .prepare(
-      `INSERT INTO quote_snapshots
-       (id, provider, scope, data_time, payload_json, is_fresh, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      crypto.randomUUID(),
-      snapshot.provider,
-      snapshot.coverage ?? "full",
-      snapshot.asOf,
-      JSON.stringify(snapshot),
-      snapshot.dataComplete ? 1 : 0,
-      now,
-      now,
-    )
-    .run();
+  if (snapshot) {
+    await db
+      .prepare(
+        `INSERT INTO quote_snapshots
+         (id, provider, scope, data_time, payload_json, is_fresh, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        snapshot.provider,
+        snapshot.coverage ?? "full",
+        snapshot.asOf,
+        JSON.stringify(snapshot),
+        snapshot.dataComplete ? 1 : 0,
+        now,
+        now,
+      )
+      .run();
+  }
   const insert = await db
     .prepare(
       `INSERT OR IGNORE INTO scheduled_job_runs
        (id, user_id, job_type, idempotency_key, trigger_json, status, attempt, started_at)
        VALUES (?, ?, ?, ?, ?, 'running', 1, ?)`,
     )
-    .bind(runId, input.userId, input.type, idempotencyKey, JSON.stringify({ fixture: snapshot.fixtureId, origin: input.origin ?? "manual" }), now)
+    .bind(
+      runId,
+      input.userId,
+      input.type,
+      idempotencyKey,
+      JSON.stringify({
+        dataVersion: snapshot?.dataVersion ?? null,
+        provider: snapshot?.provider ?? null,
+        origin: input.origin ?? "manual",
+      }),
+      now,
+    )
     .run();
   if ((insert.meta.changes ?? 0) === 0) {
     return { ok: true, status: "duplicate", duplicate: true, message: "相同数据版本已经处理，本次没有重复发送。" };
@@ -78,6 +92,7 @@ export async function executeJob(
   let delivery: Awaited<ReturnType<ReturnType<typeof getNotificationProvider>["send"]>> | undefined;
   try {
     if (input.type === "scan") {
+      if (!snapshot) throw new Error("缺少真实行情快照。");
       const events = evaluateRules(snapshot, settings);
       const createdAt = new Date().toISOString();
       for (const event of events) {
@@ -103,6 +118,7 @@ export async function executeJob(
       }
       payload = { snapshot, events, delivery };
     } else if (input.type === "review") {
+      if (!snapshot) throw new Error("缺少真实行情快照。");
       const review = generateDeterministicReview(snapshot);
       const createdAt = new Date().toISOString();
       await db
@@ -119,7 +135,7 @@ export async function executeJob(
     } else {
       const provider = getNotificationProvider(runtimeEnv, settings.notification_channel);
       delivery = await provider.send(
-        "盘面守望测试通知",
+        "Aria 监盘测试通知",
         "如果你看到这条消息，说明当前通知渠道可用。",
         input.origin,
       );

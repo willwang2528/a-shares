@@ -101,7 +101,7 @@ export function parseTencentQuoteResponse(
   const isFresh = session.isOpen ? delay <= 3 : true;
 
   return {
-    fixtureId: "real_indices",
+    dataVersion: `tencent-indices:${asOf}`,
     dataMode: "experimental_real",
     coverage: "indices_only",
     asOf,

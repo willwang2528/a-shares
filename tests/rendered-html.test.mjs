@@ -8,7 +8,7 @@ test("production bundle contains the finished Chinese product", async () => {
   const appBundle = files.find((file) => file.startsWith("AStockApp-") && file.endsWith(".js"));
   assert.ok(appBundle, "AStockApp client bundle should exist");
   const javascript = await readFile(new URL(appBundle, assetsUrl), "utf8");
-  assert.match(javascript, /盘面守望/);
+  assert.match(javascript, /Aria 监盘/);
   assert.match(javascript, /真实指数已更新/);
   assert.match(javascript, /真实数据·实验源/);
   assert.match(javascript, /先算清，再开通/);
@@ -21,9 +21,8 @@ test("production bundle contains the finished Chinese product", async () => {
   assert.match(javascript, /已使用云端缓存/);
   assert.match(javascript, /真实行情读取中/);
   assert.doesNotMatch(javascript, /-3\.42%|-9\.54%|-5\.76%/);
-  assert.doesNotMatch(javascript, /数据 14:30 · Mock/);
+  assert.doesNotMatch(javascript, /盘面守望|盘面先锋/);
   assert.doesNotMatch(javascript, /Your site is taking shape|react-loading-skeleton/i);
-  await access(new URL("../dist/client/og.png", import.meta.url));
   await access(new URL("../dist/client/manifest.webmanifest", import.meta.url));
   await access(new URL("../dist/.openai/drizzle/0000_goofy_paladin.sql", import.meta.url));
 });

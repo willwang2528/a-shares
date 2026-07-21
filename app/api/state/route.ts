@@ -31,7 +31,7 @@ export async function GET() {
       {
         ok: false,
         fallback: true,
-        message: "云端保存暂时不可用，页面将使用本次会话的演示配置。",
+        message: "云端保存暂时不可用，页面只使用本次会话内的默认设置。",
         settings: DEFAULT_SETTINGS,
       },
       503,
@@ -60,6 +60,9 @@ export async function PUT(request: Request) {
     }
     if (!["event_only", "interval_digest", "both"].includes(next.periodic_push_mode)) {
       return json({ ok: false, message: "推送模式不支持。" }, 400);
+    }
+    if (!["browser", "serverchan", "email"].includes(next.notification_channel)) {
+      return json({ ok: false, message: "通知渠道不支持。" }, 400);
     }
     await saveSettings(env.DB, user.id, next);
     return json({ ok: true, settings: next, savedAt: new Date().toISOString() });

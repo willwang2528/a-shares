@@ -22,7 +22,7 @@ export async function GET() {
     return Response.json(
       {
         ok: false,
-        message: "真实指数暂时读取失败，页面不会把 Mock 冒充为真实行情。",
+        message: "真实指数暂时读取失败，已停止生成新的行情结论。",
       },
       {
         status: 503,

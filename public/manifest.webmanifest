@@ -1,7 +1,7 @@
 {
-  "name": "盘面守望｜A 股风险提醒",
-  "short_name": "盘面守望",
-  "description": "A 股盘面监控与每日复盘",
+  "name": "Aria 监盘｜A 股真实数据提醒",
+  "short_name": "Aria 监盘",
+  "description": "A 股真实行情监控与每日复盘",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f3f4ee",

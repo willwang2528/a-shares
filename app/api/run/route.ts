@@ -8,7 +8,6 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       type?: "scan" | "review" | "test_notification";
-      fixtureId?: string;
       force?: boolean;
     };
     if (!body.type || !["scan", "review", "test_notification"].includes(body.type)) {
@@ -21,7 +20,6 @@ export async function POST(request: Request) {
       {
         userId: user.id,
         type: body.type,
-        fixtureId: body.fixtureId,
         origin: new URL(request.url).origin,
         forceId: body.force ? `${user.id}:${body.type}:manual:${crypto.randomUUID()}` : undefined,
       },

@@ -27,7 +27,8 @@ flowchart LR
 - `MarketAdapter`：交易日历、代码表、板块映射、快照、指数、涨跌停价、收盘数据与健康状态。
 - `TradingCalendar` / `MarketSessionService`：所有时间固定使用 `Asia/Shanghai`。
 - `RuleEngine`：所有数值、阈值与等级由代码计算；模型只写少量解释。
-- `NotificationProvider`：模拟、浏览器本机通知、Server酱、邮件均使用同一结果契约。
+- `NotificationProvider`：浏览器本机通知、Server酱、邮件均使用同一结果契约；未配置的渠道只返回“待配置”，不会伪造发送成功。
+- 真实数据硬约束：股票数据、预警和复盘只能引用带来源、数据时间和数据版本的真实响应；字段缺失时停止对应规则。
 - `LLMProvider`：OpenAI-compatible 主/备提供方；超时、重试、熔断和每日费用上限由服务端配置。
 - `JobLease` + 幂等键：避免同一任务并发或重复成功推送。
 - `HistoricalReviewCache`：按用户、交易日期和当前关注股票集合缓存真实历史复盘；关注股票变化后会使用新的缓存键，不会误用旧范围。
@@ -41,7 +42,7 @@ flowchart LR
 
 ## 当前部署边界
 
-当前 Sites 版本是可操作的私有演示和验收环境，使用 D1 保存配置、任务记录、预警与复盘。生产心跳保留受密钥保护的 `/api/scheduler` 入口；CloudBase 定时触发器需要在用户确认平台后接入，不能把浏览器定时器当作可靠后台调度。
+当前 Sites 版本是可操作的私有验收环境，使用 D1 保存配置、任务记录、预警与复盘。生产心跳保留受密钥保护的 `/api/scheduler` 入口；CloudBase 定时触发器需要在用户确认平台后接入，不能把浏览器定时器当作可靠后台调度。
 
 ## 源码与发布边界
 
