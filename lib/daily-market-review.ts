@@ -254,7 +254,7 @@ export async function buildMarketDailyReview(
     strongestConcepts,
     lossDirections,
     summary: {
-      headline: `${tradeDate} 六大指数中 ${strongestIndex.name}相对较强（${strongestIndex.changePct >= 0 ? "+" : ""}${strongestIndex.changePct.toFixed(2)}%），${temperature}；沪深成交 ${yi(totalYuan)}，${comparison}。行业主线为 ${strongestIndustries[0]?.name ?? "没有数据"}，概念方向为 ${strongestConcepts[0]?.name ?? "没有数据"}；尾盘分钟轨迹暂无可验证数据。`,
+      headline: `${tradeDate} 六大指数中 ${strongestIndex.name}相对较强（${strongestIndex.changePct >= 0 ? "+" : ""}${strongestIndex.changePct.toFixed(2)}%），${temperature}；沪深成交 ${yi(totalYuan)}，${comparison}；行业主线为 ${strongestIndustries[0]?.name ?? "没有数据"}，概念方向为 ${strongestConcepts[0]?.name ?? "没有数据"}，对应核心股 ${strongestIndustries[0]?.coreStock ?? "没有数据"}、${strongestConcepts[0]?.coreStock ?? "没有数据"}；主要承压方向为 ${lossDirections[0]?.name ?? "没有数据"}，其中 ${lossDirections[0]?.coreStock ?? "没有数据"}${lossDirections[0] ? ` ${lossDirections[0].finalState}` : ""}；尾盘分钟轨迹暂无可验证数据，下一交易日继续核验成交额、上涨家数占比与主线核心股是否同向，不构成买卖建议。`,
       facts: [
         `上涨 ${breadth.up} 家、下跌 ${breadth.down} 家、平盘 ${breadth.flat} 家，统计范围共 ${breadth.total} 家。`,
         `六大指数中相对较弱的是 ${weakestIndex.name}（${weakestIndex.changePct >= 0 ? "+" : ""}${weakestIndex.changePct.toFixed(2)}%）。`,

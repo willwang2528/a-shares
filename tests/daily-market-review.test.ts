@@ -72,3 +72,12 @@ test("daily review alerts use only real closing metrics and stable daily keys", 
   assert.equal(events[1]?.level, "danger");
   assert.match(events[1]?.provider ?? "", /真实/);
 });
+
+test("一句话总结覆盖核心股、承压方向、尾盘数据边界和次日观察", async () => {
+  const source = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../lib/daily-market-review.ts", import.meta.url), "utf8"));
+  assert.match(source, /对应核心股/);
+  assert.match(source, /主要承压方向/);
+  assert.match(source, /尾盘分钟轨迹暂无可验证数据/);
+  assert.match(source, /下一交易日继续核验/);
+  assert.match(source, /不构成买卖建议/);
+});
