@@ -54,6 +54,13 @@ test("daily review alerts use only real closing metrics and stable daily keys", 
     asOf: "2026-07-17T16:14:00+08:00",
     provider: "真实测试响应",
     breadth: { up: 900, down: 4000, flat: 100, total: 5000 },
+    limits: {
+      limitUp: null,
+      limitDown: null,
+      openedLimit: null,
+      openedLimitRate: null,
+      unavailableReason: "没有数据",
+    },
     indices: [
       { code: "399006.SZ", name: "创业板指", value: 3428.63, changePct: -7.15 },
     ],

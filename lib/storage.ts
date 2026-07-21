@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS, type AlertEvent, type DailyReview, type UserSettings } from "./domain";
 import type { HistoricalReviewResult } from "./historical-review";
 import type { MarketDailyReview } from "./daily-market-review";
+import type { StockIdentity } from "./market-limits";
 
 export type StoredWatchItem = {
   id: string;
@@ -437,6 +438,48 @@ export async function saveAlertEvents(
         ),
     ),
   );
+}
+
+export async function saveMarketStockCatalog(
+  db: D1Database,
+  stocks: StockIdentity[],
+) {
+  const now = new Date().toISOString();
+  for (let index = 0; index < stocks.length; index += 80) {
+    await db.batch(
+      stocks.slice(index, index + 80).map((stock) => {
+        const exchange = stock.code.endsWith(".SH") ? "SH" : "SZ";
+        return db
+          .prepare(
+            `INSERT INTO market_instruments
+              (code, name, exchange, board, provider, raw_version, created_at, updated_at)
+             VALUES (?, ?, ?, NULL, 'sina-live-catalog', ?, ?, ?)
+             ON CONFLICT(code) DO UPDATE SET
+               name = excluded.name, exchange = excluded.exchange,
+               provider = excluded.provider, raw_version = excluded.raw_version,
+               updated_at = excluded.updated_at`,
+          )
+          .bind(stock.code, stock.name, exchange, stock.providerCode, now, now);
+      }),
+    );
+  }
+}
+
+export async function loadMarketStockCatalog(db: D1Database) {
+  const rows = await db
+    .prepare(
+      `SELECT code, name, raw_version
+       FROM market_instruments
+       WHERE provider = 'sina-live-catalog' AND exchange IN ('SH', 'SZ')`,
+    )
+    .all<{ code: string; name: string; raw_version: string }>();
+  return rows.results
+    .filter((row) => /^(sh|sz)\d{6}$/.test(row.raw_version))
+    .map((row) => ({
+      code: row.code,
+      name: row.name,
+      providerCode: row.raw_version,
+    }));
 }
 
 export async function acquireLease(db: D1Database, leaseKey: string, owner: string, seconds = 45) {

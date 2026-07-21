@@ -13,7 +13,9 @@ test("production bundle contains the finished Chinese product", async () => {
   assert.match(javascript, /真实数据·实验源/);
   assert.match(javascript, /先算清，再开通/);
   assert.match(javascript, /只推异常/);
-  assert.match(javascript, /行业分类和股票都由你选择/);
+  assert.match(javascript, /行业、概念和股票都由你选择/);
+  assert.match(javascript, /上一交易日全市场复盘/);
+  assert.match(javascript, /相对较强概念/);
   assert.match(javascript, /不是单只股票/);
   assert.match(javascript, /选择一天，查看开盘前后变化/);
   assert.match(javascript, /开盘前基准/);

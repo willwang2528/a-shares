@@ -4,6 +4,7 @@ import {
 } from "@/lib/instruments";
 import type { WatchSearchResult } from "@/lib/instruments";
 import { searchSinaSectors } from "@/lib/sina-sectors";
+import { searchEastmoneyConcepts } from "@/lib/eastmoney-concepts";
 
 export const dynamic = "force-dynamic";
 
@@ -18,21 +19,24 @@ export async function GET(request: Request) {
 
   let sectors: WatchSearchResult[] = [];
   let remoteStocks: WatchSearchResult[] = [];
+  let concepts: WatchSearchResult[] = [];
   let sourceStatus: "live" | "fallback" | "featured" = query ? "live" : "featured";
-  const [sectorResult, stockResult] = await Promise.allSettled([
+  const [sectorResult, conceptResult, stockResult] = await Promise.allSettled([
     searchSinaSectors(query, query ? 10 : 8),
+    query ? searchEastmoneyConcepts(query, 10) : Promise.resolve([]),
     query ? searchTencentStocks(query) : Promise.resolve([]),
   ]);
   if (sectorResult.status === "fulfilled") sectors = sectorResult.value;
+  if (conceptResult.status === "fulfilled") concepts = conceptResult.value;
   if (stockResult.status === "fulfilled") {
     remoteStocks = stockResult.value;
   }
-  if (sectorResult.status === "rejected" || stockResult.status === "rejected") {
+  if (sectorResult.status === "rejected" || conceptResult.status === "rejected" || stockResult.status === "rejected") {
     sourceStatus = "fallback";
   }
 
   const results = mergeSearchResults(
-    sectors,
+    [...sectors, ...concepts],
     remoteStocks,
     [],
     query ? 12 : 10,

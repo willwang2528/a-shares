@@ -8,6 +8,9 @@ import {
   updateWatchTag,
 } from "@/lib/storage";
 import { currentUserIdentity } from "@/lib/user";
+import { searchTencentStocks } from "@/lib/instruments";
+import { searchSinaSectors } from "@/lib/sina-sectors";
+import { searchEastmoneyConcepts } from "@/lib/eastmoney-concepts";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +26,21 @@ async function prepareUser() {
   await ensureSchema(env.DB);
   await ensureUser(env.DB, user.id, user.email, user.displayName);
   return user;
+}
+
+async function isVerifiedRealCandidate(
+  objectType: "sector" | "stock",
+  code: string,
+  name: string,
+) {
+  if (objectType === "stock") {
+    const candidates = await searchTencentStocks(code.slice(0, 6));
+    return candidates.some((item) => item.code === code && item.name === name);
+  }
+  const candidates = code.startsWith("EASTMONEY:")
+    ? await searchEastmoneyConcepts(name, 10)
+    : await searchSinaSectors(name, 20);
+  return candidates.some((item) => item.code === code && item.name === name);
 }
 
 export async function GET() {
@@ -46,10 +64,13 @@ export async function POST(request: Request) {
       return json({ ok: false, message: "关注类型不正确。" }, 400);
     }
     const objectType = body.objectType as "sector" | "stock";
-    const code = body.code?.trim().toUpperCase() ?? "";
+    const rawCode = body.code?.trim() ?? "";
+    const code = objectType === "stock" || /^EASTMONEY:/i.test(rawCode)
+      ? rawCode.toUpperCase()
+      : rawCode;
     const name = body.name?.trim() ?? "";
     if (objectType === "sector") {
-      if (!/^SINA:[A-Z0-9_]+$/.test(code)) {
+      if (!/^(?:SINA:[a-zA-Z0-9_]+|EASTMONEY:BK\d{4})$/.test(code)) {
         return json({ ok: false, message: "板块代码不是来自当前真实目录。" }, 400);
       }
     } else if (!/^\d{6}\.(SH|SZ|BJ)$/.test(code)) {
@@ -57,6 +78,9 @@ export async function POST(request: Request) {
     }
     if (!name || name.length > 30) {
       return json({ ok: false, message: "股票或板块名称不正确。" }, 400);
+    }
+    if (!(await isVerifiedRealCandidate(objectType, code, name))) {
+      return json({ ok: false, message: "没有在当前真实目录中核验到这个对象，未保存。" }, 400);
     }
     const tag = body.tag === "holding" ? "holding" : "watch";
     const user = await prepareUser();

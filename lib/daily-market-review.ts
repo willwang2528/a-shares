@@ -1,8 +1,10 @@
 import type { AlertEvent, IndexQuote } from "./domain";
 import { fetchExperimentalRealSnapshot } from "./market";
 import { fetchSinaIndustryPerformance } from "./sina-sector-performance";
+import { fetchSinaConceptPerformance } from "./sina-concept-performance";
+import { fetchPreviousTradingDayTurnover } from "./eastmoney-turnover";
 
-const PROVIDER = "腾讯公开行情页面接口（真实收盘数据·实验源）";
+const PROVIDER = "腾讯公开行情 + 新浪财经板块排行 + 东方财富历史日线（真实数据·实验源）";
 const SOURCE_URL = "https://gu.qq.com/";
 
 export type ExchangeCloseStats = {
@@ -45,12 +47,16 @@ export type MarketDailyReview = {
     changePct: number;
     turnoverYuan: number;
     coreStock: string;
+    limitUp: number | null;
+    sourceNode: string;
   }>;
   strongestConcepts: Array<{
     name: string;
     changePct: number;
     turnoverYuan: number;
     coreStock: string;
+    limitUp: number | null;
+    sourceNode: string;
   }>;
   lossDirections: Array<{
     name: string;
@@ -146,17 +152,25 @@ export async function buildMarketDailyReview(
 ): Promise<MarketDailyReview> {
   const snapshot = await fetchExperimentalRealSnapshot(fetcher);
   const tradeDate = snapshot.asOf.slice(0, 10);
-  const [shanghai, shenzhen, industries] = await Promise.all([
+  const [shanghai, shenzhen, industries, concepts] = await Promise.all([
     fetchExchangeCloseStats("sh000001", tradeDate, fetcher),
     fetchExchangeCloseStats("sz399001", tradeDate, fetcher),
     fetchSinaIndustryPerformance(fetcher),
+    fetchSinaConceptPerformance(fetcher),
   ]);
   if (shanghai.tradeDate !== tradeDate || shenzhen.tradeDate !== tradeDate) {
     throw new Error("指数与市场统计的交易日期不一致");
   }
   const totalYuan = shanghai.turnoverYuan + shenzhen.turnoverYuan;
   const comparablePrevious = previous?.tradeDate < tradeDate ? previous : null;
-  const previousTotalYuan = comparablePrevious?.turnover.totalYuan ?? null;
+  let historicalPrevious: Awaited<ReturnType<typeof fetchPreviousTradingDayTurnover>> | null = null;
+  try {
+    historicalPrevious = await fetchPreviousTradingDayTurnover(tradeDate, fetcher);
+  } catch {
+    // 历史源不可用时保留缓存比较；两者都没有则明确显示暂无数据。
+  }
+  const previousTradeDate = historicalPrevious?.tradeDate ?? comparablePrevious?.tradeDate ?? null;
+  const previousTotalYuan = historicalPrevious?.totalYuan ?? comparablePrevious?.turnover.totalYuan ?? null;
   const changeYuan = previousTotalYuan === null ? null : totalYuan - previousTotalYuan;
   const changePct =
     previousTotalYuan && changeYuan !== null
@@ -179,7 +193,7 @@ export async function buildMarketDailyReview(
   const comparison =
     changePct === null
       ? "前一交易日同口径成交额尚无已缓存真实记录"
-      : `较 ${comparablePrevious?.tradeDate} ${changePct >= 0 ? "增加" : "减少"} ${yi(Math.abs(changeYuan ?? 0))}（${Math.abs(changePct).toFixed(2)}%）`;
+      : `较 ${previousTradeDate} ${changePct >= 0 ? "增加" : "减少"} ${yi(Math.abs(changeYuan ?? 0))}（${Math.abs(changePct).toFixed(2)}%）`;
   const strongestIndustries = [...industries]
     .sort((left, right) => right.changePct - left.changePct)
     .slice(0, 3)
@@ -188,6 +202,19 @@ export async function buildMarketDailyReview(
       changePct: item.changePct,
       turnoverYuan: item.turnoverYuan,
       coreStock: `${item.coreStock}（${item.coreStockChangePct >= 0 ? "+" : ""}${item.coreStockChangePct.toFixed(2)}%）`,
+      limitUp: null,
+      sourceNode: item.code.replace(/^SINA:/, ""),
+    }));
+  const strongestConcepts = [...concepts]
+    .sort((left, right) => right.changePct - left.changePct)
+    .slice(0, 3)
+    .map((item) => ({
+      name: item.name,
+      changePct: item.changePct,
+      turnoverYuan: item.turnoverYuan,
+      coreStock: `${item.coreStock}（${item.coreStockChangePct >= 0 ? "+" : ""}${item.coreStockChangePct.toFixed(2)}%）`,
+      limitUp: null,
+      sourceNode: item.code.replace(/^SINA:/, ""),
     }));
   const lossDirections = [...industries]
     .sort((left, right) => left.changePct - right.changePct)
@@ -210,7 +237,7 @@ export async function buildMarketDailyReview(
       shanghaiYuan: shanghai.turnoverYuan,
       shenzhenYuan: shenzhen.turnoverYuan,
       totalYuan,
-      previousTradeDate: comparablePrevious?.tradeDate ?? null,
+      previousTradeDate,
       previousTotalYuan,
       changeYuan,
       changePct,
@@ -224,21 +251,24 @@ export async function buildMarketDailyReview(
       unavailableReason: "当前汇总响应没有逐只股票的当日涨跌停价；未按固定百分比推算。",
     },
     strongestIndustries,
-    strongestConcepts: [],
+    strongestConcepts,
     lossDirections,
     summary: {
-      headline: `${tradeDate} 六大指数中 ${strongestIndex.name}相对较强（${strongestIndex.changePct >= 0 ? "+" : ""}${strongestIndex.changePct.toFixed(2)}%），${temperature}；沪深成交 ${yi(totalYuan)}，${comparison}。`,
+      headline: `${tradeDate} 六大指数中 ${strongestIndex.name}相对较强（${strongestIndex.changePct >= 0 ? "+" : ""}${strongestIndex.changePct.toFixed(2)}%），${temperature}；沪深成交 ${yi(totalYuan)}，${comparison}。行业主线为 ${strongestIndustries[0]?.name ?? "没有数据"}，概念方向为 ${strongestConcepts[0]?.name ?? "没有数据"}；尾盘分钟轨迹暂无可验证数据。`,
       facts: [
         `上涨 ${breadth.up} 家、下跌 ${breadth.down} 家、平盘 ${breadth.flat} 家，统计范围共 ${breadth.total} 家。`,
         `六大指数中相对较弱的是 ${weakestIndex.name}（${weakestIndex.changePct >= 0 ? "+" : ""}${weakestIndex.changePct.toFixed(2)}%）。`,
         `申万一级行业成分股等权平均中相对较强的是 ${strongestIndustries[0]?.name ?? "没有数据"}；该口径不是行业指数涨幅。`,
         `相对较弱的行业方向是 ${lossDirections[0]?.name ?? "没有数据"}；只描述真实收盘数据，不推测原因。`,
-        "概念、涨跌停和炸板数据只有在逐项真实字段完整后才加入总结。",
+        `真实概念排行中相对较强的是 ${strongestConcepts[0]?.name ?? "没有数据"}，核心股为 ${strongestConcepts[0]?.coreStock ?? "没有数据"}。`,
+        "尾盘分钟轨迹当前没有稳定的真实历史字段，因此不推测尾盘强弱。",
+        "涨跌停和炸板数据只有在逐只股票的真实当日限价字段完整后才加入总结。",
       ],
       tomorrowChecks: [
         "下一交易日继续比较同口径沪深成交额是否放大或缩小。",
         "继续观察上涨家数占比与主要指数方向是否一致。",
         `继续观察 ${strongestIndustries[0]?.name ?? "行业排行"} 的成分股表现是否延续；这是观察条件，不是操作建议。`,
+        `继续核验 ${strongestConcepts[0]?.name ?? "概念排行"} 与其核心股能否保持同向；不构成买卖建议。`,
       ],
     },
   };
@@ -280,6 +310,22 @@ export function alertsFromMarketDailyReview(
       threshold: "≤ -3.00%",
       reason: "六大指数真实收盘涨跌幅达到历史预警记录阈值。",
       level: index.changePct <= -5 ? "danger" : "warning",
+      dataTime: review.asOf,
+      provider: review.provider,
+    });
+  }
+  if (review.limits.limitDown !== null && review.limits.limitDown >= 50) {
+    events.push({
+      id: `daily:${review.tradeDate}:limit-down-surge`,
+      objectType: "market",
+      objectCode: "ALL-A",
+      objectName: "A 股全市场",
+      eventType: "daily_limit_down_surge",
+      title: `${review.tradeDate} 跌停股票数量较多`,
+      currentValue: `${review.limits.limitDown} 家`,
+      threshold: "≥ 50 家",
+      reason: "使用数据源逐只返回的当日跌停价与真实收盘价核对，未使用固定涨跌幅推算。",
+      level: review.limits.limitDown >= 80 ? "danger" : "warning",
       dataTime: review.asOf,
       provider: review.provider,
     });

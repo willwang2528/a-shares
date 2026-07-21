@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import costSnapshot from "@/data/cost-snapshot.json";
 import lastRealIndexSnapshot from "@/data/last-real-index-snapshot.json";
 import {
@@ -68,6 +68,7 @@ type ApiData = {
   cacheExpiresAt?: string;
   review?: MarketDailyReview;
   stale?: boolean;
+  needsCatalog?: boolean;
   payload?: {
     events?: AlertEvent[];
     snapshot?: MarketSnapshot;
@@ -207,6 +208,35 @@ export function AStockApp() {
   const session = getMarketSessionState(new Date());
   const visibleAlerts = alerts.filter((event) => alertLevel === "all" || event.level === alertLevel);
 
+  const loadDailyLimitsWithCatalog = useCallback(async () => {
+    try {
+      let response = await fetch("/api/daily-market-limits", { cache: "no-store" });
+      let data = await readApiData(response);
+      if (response.status === 409 && data.needsCatalog) {
+        for (const group of [0, 1]) {
+          const catalogResponse = await fetch(`/api/market-stock-catalog?group=${group}`, {
+            cache: "no-store",
+          });
+          if (!catalogResponse.ok) return;
+        }
+        response = await fetch("/api/daily-market-limits?refresh=1", { cache: "no-store" });
+        data = await readApiData(response);
+      }
+      if (!response.ok || !data.review) return;
+      setMarketReview(data.review);
+      if (Array.isArray(data.events) && data.events.length) {
+        setAlerts((current) => {
+          const merged = [...data.events!, ...current];
+          return merged.filter(
+            (event, index) => merged.findIndex((item) => item.id === event.id) === index,
+          );
+        });
+      }
+    } catch {
+      // 页面继续保留已验证的收盘复盘，并明确显示限价统计没有数据。
+    }
+  }, []);
+
   useEffect(() => {
     const queryPage = new URLSearchParams(window.location.search).get("page") as PageId | null;
     if (queryPage && NAV.some((item) => item.id === queryPage)) {
@@ -260,13 +290,14 @@ export function AStockApp() {
             );
           });
         }
+        if (data.review.limits.limitUp === null) void loadDailyLimitsWithCatalog();
         setMarketReviewError(data.stale ? (data.message ?? "当前显示上一次成功缓存。") : null);
       })
       .catch((error) => {
         setMarketReviewError(error instanceof Error ? error.message : "没有可用的真实收盘复盘。");
       })
       .finally(() => setMarketReviewLoading(false));
-  }, []);
+  }, [loadDailyLimitsWithCatalog]);
 
   useEffect(() => {
     const codes = watchItems
@@ -663,7 +694,18 @@ export function AStockApp() {
                         {marketReview.strongestIndustries.map((item) => (
                           <span key={item.name}>
                             <b>{item.name} {signed(item.changePct)}</b>
-                            <small>成交 {formatYi(item.turnoverYuan)} · 核心股 {item.coreStock}</small>
+                            <small>成交 {formatYi(item.turnoverYuan)} · 涨停 {item.limitUp === null ? "暂无数据" : `${item.limitUp} 家`} · 核心股 {item.coreStock}</small>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {marketReview.strongestConcepts.length ? (
+                      <div className="market-direction-list">
+                        <strong>相对较强概念 · 新浪真实板块排行</strong>
+                        {marketReview.strongestConcepts.map((item) => (
+                          <span key={item.name}>
+                            <b>{item.name} {signed(item.changePct)}</b>
+                            <small>成交 {formatYi(item.turnoverYuan)} · 涨停 {item.limitUp === null ? "暂无数据" : `${item.limitUp} 家`} · 核心股 {item.coreStock}</small>
                           </span>
                         ))}
                       </div>
@@ -672,6 +714,14 @@ export function AStockApp() {
                   <div className="panel market-review-checks">
                     <Pill tone="amber">明日客观观察</Pill>
                     <h2>只列可继续核验的条件</h2>
+                    {marketReview.limits.limitUp !== null ? (
+                      <div className="market-review-metrics">
+                        <span><small>涨停</small><strong>{marketReview.limits.limitUp} 家</strong></span>
+                        <span><small>跌停</small><strong>{marketReview.limits.limitDown} 家</strong></span>
+                        <span><small>炸板</small><strong>{marketReview.limits.openedLimit} 家</strong></span>
+                        <span><small>炸板率</small><strong>{marketReview.limits.openedLimitRate?.toFixed(1)}%</strong></span>
+                      </div>
+                    ) : null}
                     <ol>{marketReview.summary.tomorrowChecks.map((item) => <li key={item}>{item}</li>)}</ol>
                     {marketReview.lossDirections.length ? (
                       <div className="market-direction-list loss">
@@ -716,7 +766,7 @@ export function AStockApp() {
         {page === "watch" && (
           <div className="page-stack">
             <section className="intro-card">
-                <div><Pill tone="green">先选择，再确认</Pill><h2>行业分类和股票都由你选择</h2><p>“有色金属”是把相关上市公司归到一起的行业大类，不是一只股票；输入名称、常用说法或 6 位代码后，系统会返回多个候选供你选择。</p></div>
+                <div><Pill tone="green">先选择，再确认</Pill><h2>行业、概念和股票都由你选择</h2><p>“有色金属”是行业大类，“小红书概念”是概念板块，它们都不是一只股票；输入名称、常用说法或 6 位代码后，系统会返回多个真实候选供你选择。</p></div>
               <span className="intro-glyph">◎</span>
             </section>
             <section className="panel">
@@ -758,7 +808,7 @@ export function AStockApp() {
                           <div className="candidate-title">
                             <strong>{result.name}</strong>
                             <Pill tone={result.objectType === "sector" ? "green" : "amber"}>
-                              {result.objectType === "sector" ? "行业分类" : "股票"}
+                              {result.objectType === "sector" ? (result.classification.includes("概念") ? "概念板块" : "行业分类") : "股票"}
                             </Pill>
                           </div>
                           <p>{result.code} · {result.classification}</p>
@@ -795,15 +845,15 @@ export function AStockApp() {
                   </div>
                   <dl>
                     <div><dt>数据源分类</dt><dd>{selectedResult.classification}</dd></div>
-                    <div><dt>{selectedResult.objectType === "sector" ? "行业代码" : "股票代码"}</dt><dd>{selectedResult.code}</dd></div>
+                    <div><dt>{selectedResult.objectType === "sector" ? "板块代码" : "股票代码"}</dt><dd>{selectedResult.code}</dd></div>
                     <div>
                       <dt>{selectedResult.objectType === "sector" ? "成分股数量" : "行情状态"}</dt>
-                      <dd>{selectedResult.objectType === "sector" ? "待正式源确认" : "添加后读取真实快照"}</dd>
+                      <dd>{selectedResult.objectType === "sector" ? (selectedResult.memberCount === null ? "数据源当前未提供" : `${selectedResult.memberCount} 只`) : "添加后读取真实快照"}</dd>
                     </div>
                   </dl>
                   <p className="plain-note">
                     人话解释：{selectedResult.objectType === "sector"
-                      ? `将按“${selectedResult.classification}”里的“${selectedResult.name}”监控；成分股数量会变化，未接正式数据源前不展示猜测数字。`
+                      ? `将按“${selectedResult.classification}”里的“${selectedResult.name}”观察板块方向；它不是一只股票，没有单一股价。成分股数量会变化，数据源未提供时明确显示没有数据。`
                       : "这里只确认你要关注哪只 A 股；添加后读取公开页面的真实行情，读取失败时明确显示不可用。"}
                     {" "}
                     <a href={selectedResult.sourceUrl} target="_blank" rel="noreferrer">
@@ -1031,11 +1081,12 @@ function WatchObject({
   onRemove: () => void;
 }) {
   const isStock = item.object_type === "stock";
+  const isConcept = !isStock && (item.code.startsWith("EASTMONEY:") || item.code.startsWith("SINA:gn_"));
   return (
     <article className={`object-card ${isStock ? "" : "sector-card"}`}>
       <div className="object-card-top">
         <span className={`object-icon ${isStock ? "stock" : ""}`}>
-          {isStock ? "股" : "类"}
+          {isStock ? "股" : isConcept ? "概" : "行"}
         </span>
         <Pill tone={item.tag === "holding" ? "amber" : "neutral"}>
           {item.tag === "holding" ? "持有" : "仅关注"}
@@ -1043,12 +1094,12 @@ function WatchObject({
       </div>
       <h3>{item.name}</h3>
       <p>
-        {isStock ? item.code : `申万一级行业 · ${item.code}`}
+        {isStock ? item.code : `${isConcept ? "概念板块" : "行业分类"} · ${item.code}`}
         {item.cost_price ? ` · 手填成本价 ${item.cost_price}` : ""}
       </p>
       {!isStock ? (
         <div className="sector-explainer">
-          <Pill tone="green">行业分类</Pill>
+          <Pill tone="green">{isConcept ? "概念板块" : "行业分类"}</Pill>
           <strong>不是单只股票</strong>
           <small>它代表一组相关上市公司，用于汇总观察；没有一个可以直接展示的单一股价。</small>
         </div>
