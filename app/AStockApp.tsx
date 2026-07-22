@@ -24,6 +24,7 @@ import type {
 import type { WatchSearchResult } from "@/lib/instruments";
 import type { StockQuote } from "@/lib/market";
 import type { MarketDailyReview } from "@/lib/daily-market-review";
+import type { TodayBrief, TodayBriefLayer } from "@/lib/today-brief";
 
 type PageId =
   | "home"
@@ -67,6 +68,7 @@ type ApiData = {
   cacheHit?: boolean;
   cacheExpiresAt?: string;
   review?: MarketDailyReview;
+  brief?: TodayBrief;
   stale?: boolean;
   needsCatalog?: boolean;
   payload?: {
@@ -115,6 +117,20 @@ function shanghaiDate(date = new Date()) {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+  }).format(date);
+}
+
+function shanghaiDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16).replace("T", " ");
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
   }).format(date);
 }
 
@@ -201,10 +217,16 @@ export function AStockApp() {
   const [marketReview, setMarketReview] = useState<MarketDailyReview | null>(null);
   const [marketReviewLoading, setMarketReviewLoading] = useState(true);
   const [marketReviewError, setMarketReviewError] = useState<string | null>(null);
+  const [todayBrief, setTodayBrief] = useState<TodayBrief | null>(null);
+  const [todayBriefLoading, setTodayBriefLoading] = useState(true);
+  const [todayBriefError, setTodayBriefError] = useState<string | null>(null);
 
   const currentAlerts = useMemo(() => evaluateRules(snapshot, settings), [snapshot, settings]);
   const risk = highestRisk(currentAlerts);
-  const riskInfo = riskCopy(risk);
+  const marketRiskIncomplete = snapshot.coverage === "indices_only";
+  const riskInfo = marketRiskIncomplete
+    ? { label: "市场风险未完整判断", icon: "?", detail: "当前只有指数，不能据此判断全市场风险" }
+    : riskCopy(risk);
   const session = getMarketSessionState(new Date());
   const visibleAlerts = alerts.filter((event) => alertLevel === "all" || event.level === alertLevel);
 
@@ -236,6 +258,25 @@ export function AStockApp() {
       // 页面继续保留已验证的收盘复盘，并明确显示限价统计没有数据。
     }
   }, []);
+
+  const loadTodayBrief = useCallback(async () => {
+    setTodayBriefLoading(true);
+    try {
+      const response = await fetch("/api/today-brief", { cache: "no-store" });
+      const data = await readApiData(response);
+      if (!response.ok || !data.brief) throw new Error(data.message);
+      setTodayBrief(data.brief);
+      setTodayBriefError(null);
+    } catch (error) {
+      setTodayBrief(null);
+      setTodayBriefError(
+        error instanceof Error ? error.message : "与我有关的真实摘要读取失败。",
+      );
+    } finally {
+      setTodayBriefLoading(false);
+    }
+  }, []);
+
 
   useEffect(() => {
     const queryPage = new URLSearchParams(window.location.search).get("page") as PageId | null;
@@ -297,7 +338,8 @@ export function AStockApp() {
         setMarketReviewError(error instanceof Error ? error.message : "没有可用的真实收盘复盘。");
       })
       .finally(() => setMarketReviewLoading(false));
-  }, [loadDailyLimitsWithCatalog]);
+    queueMicrotask(() => void loadTodayBrief());
+  }, [loadDailyLimitsWithCatalog, loadTodayBrief]);
 
   useEffect(() => {
     const codes = watchItems
@@ -344,6 +386,7 @@ export function AStockApp() {
       setMarketError(error instanceof Error ? error.message : "真实指数读取失败。");
       setToast("真实指数读取失败；已停止生成新的行情结论。");
     } finally {
+      await loadTodayBrief();
       setMarketLoading(false);
     }
   }
@@ -511,6 +554,7 @@ export function AStockApp() {
       setWatchItems(data.watches);
       setSelectedResult(null);
       setToast(data.message ?? "已加入关注。");
+      void loadTodayBrief();
     } catch (error) {
       setToast(error instanceof Error ? error.message : "添加失败，请稍后重试。");
     } finally {
@@ -531,6 +575,7 @@ export function AStockApp() {
       if (!response.ok || !Array.isArray(data.watches)) throw new Error(data.message);
       setWatchItems(data.watches);
       setToast(data.message ?? "标签已修改。");
+      void loadTodayBrief();
     } catch (error) {
       setToast(error instanceof Error ? error.message : "标签修改失败。");
     } finally {
@@ -548,6 +593,7 @@ export function AStockApp() {
       if (!response.ok || !Array.isArray(data.watches)) throw new Error(data.message);
       setWatchItems(data.watches);
       setToast(`${item.name}已从关注列表移除。`);
+      void loadTodayBrief();
     } catch (error) {
       setToast(error instanceof Error ? error.message : "移除失败。");
     } finally {
@@ -615,7 +661,7 @@ export function AStockApp() {
 
         {page === "home" && (
           <div className="page-stack">
-            <section className={`risk-hero risk-${risk}`}>
+            <section className={`risk-hero risk-${marketRiskIncomplete ? "incomplete" : risk}`}>
               <div className="hero-copy">
                 <div className="hero-kicker">
                   <span className="risk-icon">{riskInfo.icon}</span>
@@ -625,9 +671,13 @@ export function AStockApp() {
                   </span>
                 </div>
                 <h2>
-                  {marketLoading ? "正在检查行情更新" : "真实指数已更新"}
+                  {marketLoading
+                    ? "正在检查行情更新"
+                    : marketRiskIncomplete
+                      ? "市场风险未完整判断"
+                      : riskInfo.label}
                 </h2>
-                <p>当前真实数据覆盖六个主要指数和已关注股票。市场宽度、行业成分和涨跌停只有在真实字段完整时才生成结论。</p>
+                <p>{marketRiskIncomplete ? riskInfo.detail : "当前真实数据覆盖六个主要指数和已关注股票。市场宽度、行业成分和涨跌停只有在真实字段完整时才生成结论。"}</p>
                 {marketError ? <p className="source-warning">{marketError}</p> : null}
                 <div className="hero-actions">
                   <button className="button button-dark" onClick={() => refreshRealMarket()} disabled={marketLoading}>
@@ -647,9 +697,56 @@ export function AStockApp() {
               </div>
             </section>
 
+            <section className="runtime-truth" aria-label="当前运行方式">
+              <span aria-hidden="true">手动</span>
+              <div>
+                <strong>关闭页面后不会自动监控</strong>
+                <p>打开页面时读取一次真实数据，也可以手动刷新。任务开关目前只保存偏好，尚未连接后台定时触发器。</p>
+              </div>
+            </section>
+
+            <section className="today-brief" aria-labelledby="today-brief-title">
+              <div className="section-head compact">
+                <div>
+                  <p className="eyebrow">市场 → 关注板块 → 关注股票</p>
+                  <h2 id="today-brief-title">和我有关的三件事</h2>
+                </div>
+                <button
+                  type="button"
+                  className="button button-light"
+                  onClick={() => loadTodayBrief()}
+                  disabled={todayBriefLoading}
+                >
+                  {todayBriefLoading ? "正在读取…" : "刷新三件事"}
+                </button>
+              </div>
+              {todayBriefError ? (
+                <p className="source-warning" role="status">{todayBriefError} 页面没有使用替代行情。</p>
+              ) : null}
+              <div className="today-brief-grid" aria-live="polite">
+                {todayBrief ? (
+                  ([todayBrief.layers.market, todayBrief.layers.sector, todayBrief.layers.stock] as TodayBriefLayer[]).map((layer) => (
+                    <TodayBriefCard
+                      key={layer.layer}
+                      layer={layer}
+                      onDetail={() => go(layer.layer === "market" ? "home" : "watch")}
+                    />
+                  ))
+                ) : (
+                  (["market", "sector", "stock"] as const).map((layer) => (
+                    <article className="today-brief-card is-loading" key={layer}>
+                      <Pill tone="neutral">{layer === "market" ? "市场" : layer === "sector" ? "关注板块" : "关注股票"}</Pill>
+                      <h3>{todayBriefLoading ? "正在读取真实数据" : "没有数据"}</h3>
+                      <p>{todayBriefLoading ? "每一层独立读取，单层失败不会影响另外两层。" : "当前没有取得可验证的真实结果。"}</p>
+                    </article>
+                  ))
+                )}
+              </div>
+            </section>
+
             <section className="session-note">
               <span aria-hidden="true">◷</span>
-              <div><strong>{session.reason}</strong><p>下一项：{nextTaskLabel(settings)}</p></div>
+              <div><strong>{session.reason}</strong><p>计划配置（尚未后台运行）：{nextTaskLabel(settings)}</p></div>
             </section>
 
             <section>
@@ -756,7 +853,7 @@ export function AStockApp() {
               <div>
                 <Pill tone="green">关注决定复盘范围</Pill>
                 <h2>当前有 {watchItems.filter((item) => item.object_type === "stock").length} 只股票会进入历史复盘</h2>
-                <p>行业分类用于观察方向，不会被当成单只股票计算价格。添加或移除股票后，下一次复盘会自动使用新的股票集合和缓存键。</p>
+                <p>行业分类用于观察方向，不会被当成单只股票计算价格。添加或移除股票后，下次手动复盘会使用新的股票集合和缓存键。</p>
               </div>
               <button className="button button-dark" onClick={() => go("reviews")}>按当前关注去复盘</button>
             </section>
@@ -908,7 +1005,7 @@ export function AStockApp() {
               <div>
                 <Pill tone="green">下一步：按关注范围复盘</Pill>
                 <h2>{watchItems.filter((item) => item.object_type === "stock").length} 只股票会进入历史复盘</h2>
-                <p>行业分类只作为观察方向；股票增删后会自动生成新的复盘缓存范围，不会继续使用旧股票集合。</p>
+                <p>行业分类只作为观察方向；股票增删后，下次手动复盘会使用新的股票范围和缓存键，不会继续使用旧股票集合。</p>
               </div>
               <button className="button button-dark" onClick={() => go("reviews")}>进入复盘</button>
             </section>
@@ -917,22 +1014,29 @@ export function AStockApp() {
 
         {page === "tasks" && (
           <div className="page-stack narrow">
+            <section className="runtime-truth" aria-label="任务当前状态">
+              <span aria-hidden="true">未启动</span>
+              <div>
+                <strong>这些开关目前只保存你的计划</strong>
+                <p>当前部署尚未连接后台定时触发器，关闭网页后不会自动扫描或推送。接通后，系统才会按这里保存的设置执行。</p>
+              </div>
+            </section>
             <section className="task-card">
-              <TaskHeader number="A" title="周期监控" detail="盘中按固定间隔扫描；午休、周末和节假日自动跳过。" enabled={settings.periodic_monitoring_enabled} onChange={(value) => patchSettings({ periodic_monitoring_enabled: value })} />
+              <TaskHeader number="A" title="周期监控" detail="接入定时触发器后，将只在盘中按所选间隔扫描；当前这里只保存偏好。" enabled={settings.periodic_monitoring_enabled} onChange={(value) => patchSettings({ periodic_monitoring_enabled: value })} />
               <div className={settings.periodic_monitoring_enabled ? "task-body" : "task-body disabled"}>
                 <label className="field"><span>多久扫描一次</span><small>扫描不等于每次都推送</small><select value={settings.monitor_interval_minutes} onChange={(event) => patchSettings({ monitor_interval_minutes: Number(event.target.value) as UserSettings["monitor_interval_minutes"] })}><option value={5}>每 5 分钟（默认）</option><option value={30}>每 30 分钟</option><option value={60}>每 60 分钟</option><option value={120}>每 120 分钟</option><option value={180}>每 180 分钟</option></select></label>
                 <fieldset><legend>什么情况下推送</legend><div className="choice-grid">{(Object.keys(PUSH_MODE_COPY) as Array<keyof typeof PUSH_MODE_COPY>).map((mode) => <label className={`choice-card ${settings.periodic_push_mode === mode ? "selected" : ""}`} key={mode}><input type="radio" name="push-mode" checked={settings.periodic_push_mode === mode} onChange={() => patchSettings({ periodic_push_mode: mode })} /><span><b>{PUSH_MODE_COPY[mode][0]}</b><small>{PUSH_MODE_COPY[mode][1]}</small></span></label>)}</div></fieldset>
               </div>
             </section>
             <section className="task-card">
-              <TaskHeader number="B" title="关键时点扫描" detail="市场 → 板块 → 自选股三层简报；与周期扫描重合时只发一条。" enabled={settings.key_moment_monitoring_enabled} onChange={(value) => patchSettings({ key_moment_monitoring_enabled: value })} />
+              <TaskHeader number="B" title="关键时点扫描" detail="接入后台三层扫描后，将在这些时点生成合并简报；当前只保存时点。" enabled={settings.key_moment_monitoring_enabled} onChange={(value) => patchSettings({ key_moment_monitoring_enabled: value })} />
               <div className={settings.key_moment_monitoring_enabled ? "task-body" : "task-body disabled"}>
                 <div className="time-chips">{settings.key_moments.map((time) => <span key={time}>{time}<button aria-label={`删除 ${time}`} onClick={() => patchSettings({ key_moments: settings.key_moments.filter((item) => item !== time) })}>×</button></span>)}</div>
                 <div className="add-time"><input type="time" value={keyMomentDraft} onChange={(event) => setKeyMomentDraft(event.target.value)} /><button className="button button-light" onClick={() => { if (!settings.key_moments.includes(keyMomentDraft)) patchSettings({ key_moments: [...settings.key_moments, keyMomentDraft].sort() }); }}>添加时点</button></div>
               </div>
             </section>
             <section className="task-card">
-              <TaskHeader number="C" title="收盘复盘" detail="15:10 数字速览；16:30 数据就绪后生成完整复盘，每天最多成功推送一次。" enabled={settings.daily_review_enabled} onChange={(value) => patchSettings({ daily_review_enabled: value })} />
+              <TaskHeader number="C" title="收盘复盘" detail="接入后台触发和数据就绪检查后，将按所选时间生成复盘；当前只保存时间。" enabled={settings.daily_review_enabled} onChange={(value) => patchSettings({ daily_review_enabled: value })} />
               <div className={settings.daily_review_enabled ? "task-body two-fields" : "task-body two-fields disabled"}><label className="field"><span>收盘速览</span><input type="time" value={settings.quick_review_time} onChange={(event) => patchSettings({ quick_review_time: event.target.value })} /></label><label className="field"><span>完整复盘</span><input type="time" value={settings.full_review_time} onChange={(event) => patchSettings({ full_review_time: event.target.value })} /></label></div>
             </section>
             <div className="save-bar"><div><strong>{saveState}</strong><span>三条任务链互不捆绑</span></div><button className="button button-dark" onClick={saveSettings}>保存全部设置</button></div>
@@ -945,7 +1049,7 @@ export function AStockApp() {
               <div className="filter-tabs">{(["all", "danger", "warning", "notice"] as const).map((level) => <button key={level} className={alertLevel === level ? "active" : ""} onClick={() => setAlertLevel(level)}>{level === "all" ? "全部" : level === "danger" ? "高风险" : level === "warning" ? "需留意" : "一般"}</button>)}</div>
               <Pill tone="green">只显示真实数据生成的记录</Pill>
             </section>
-            <section className="summary-strip"><div><strong>{visibleAlerts.length}</strong><span>条符合筛选</span></div><div><strong>{visibleAlerts.filter((event) => event.level === "danger").length}</strong><span>条高风险</span></div><div><strong>1</strong><span>批合并结果</span></div><button className="button button-dark" onClick={() => run("scan")} disabled={running === "scan"}>{running === "scan" ? "正在扫描…" : "运行一次扫描"}</button></section>
+            <section className="summary-strip"><div><strong>{visibleAlerts.length}</strong><span>条符合筛选</span></div><div><strong>{visibleAlerts.filter((event) => event.level === "danger").length}</strong><span>条高风险</span></div><div><strong>—</strong><span>没有真实批次数据</span></div><button className="button button-dark" onClick={() => run("scan")} disabled={running === "scan"}>{running === "scan" ? "正在扫描…" : "运行一次扫描"}</button></section>
             <section className="alert-list">{visibleAlerts.length ? visibleAlerts.map((event) => <AlertCard key={event.id} event={event} expanded />) : <Empty title="当前筛选没有预警" detail="这不代表没有市场风险，只表示没有事件达到当前规则阈值。" />}</section>
           </div>
         )}
@@ -1061,6 +1165,69 @@ export function AStockApp() {
 function statusLabel(status: string) {
   const labels: Record<string, string> = { healthy: "正常", ready: "已就绪", experimental: "真实·实验", degraded: "已降级", needs_config: "待配置", configured_unverified: "待验证", failed: "异常" };
   return labels[status] ?? status;
+}
+
+function TodayBriefCard({
+  layer,
+  onDetail,
+}: {
+  layer: TodayBriefLayer;
+  onDetail: () => void;
+}) {
+  const layerLabel = layer.layer === "market" ? "市场" : layer.layer === "sector" ? "关注板块" : "关注股票";
+  const statusText = layer.status === "available"
+    ? layer.layer === "market" && layer.level === null
+      ? "指数价格事实"
+      : layer.level === "danger"
+      ? "风险上升"
+      : layer.level === "warning"
+        ? "需要留意"
+        : "价格事实"
+    : layer.status === "no_watch"
+      ? "尚未关注"
+      : layer.status === "stale"
+        ? "数据已过期"
+        : "没有数据";
+  const tone = layer.status === "stale" || layer.level === "danger"
+    ? "red"
+    : layer.level === "warning"
+      ? "amber"
+      : layer.status === "available" && layer.level !== null
+        ? "green"
+        : "neutral";
+  return (
+    <article className={`today-brief-card brief-${layer.status}`}>
+      <div className="today-brief-card-head">
+        <Pill tone="neutral">{layerLabel}</Pill>
+        <Pill tone={tone}>{statusText}</Pill>
+      </div>
+      <div>
+        <h3>{layer.name}</h3>
+        {layer.code ? <small>{layer.code}</small> : null}
+      </div>
+      <strong className={layer.changePct === null ? "brief-unavailable" : layer.changePct >= 0 ? "up" : "down"}>
+        {layer.currentValue}
+      </strong>
+      <dl>
+        <div><dt>比较基准</dt><dd>{layer.comparisonBase}</dd></div>
+        <div><dt>为什么展示</dt><dd>{layer.reason}</dd></div>
+        <div><dt>覆盖范围</dt><dd>{layer.coverageText}</dd></div>
+        <div><dt>{layer.dataTimeLabel}</dt><dd>{layer.dataTime ? shanghaiDateTime(layer.dataTime) : "没有可用时间"}</dd></div>
+      </dl>
+      <footer>
+        {layer.sourceUrl ? (
+          <a href={layer.sourceUrl} target="_blank" rel="noreferrer">
+            {layer.provider} ↗
+          </a>
+        ) : (
+          <span>{layer.provider}</span>
+        )}
+        <button type="button" className="text-button" onClick={onDetail}>
+          {layer.layer === "market" ? "查看主要指数" : "管理关注"}
+        </button>
+      </footer>
+    </article>
+  );
 }
 
 function TaskHeader({ number, title, detail, enabled, onChange }: { number: string; title: string; detail: string; enabled: boolean; onChange: (value: boolean) => void }) {

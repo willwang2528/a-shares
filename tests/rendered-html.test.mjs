@@ -22,6 +22,16 @@ test("production bundle contains the finished Chinese product", async () => {
   assert.match(javascript, /没有数据/);
   assert.match(javascript, /已使用云端缓存/);
   assert.match(javascript, /真实行情读取中/);
+  assert.match(javascript, /和我有关的三件事/);
+  assert.match(javascript, /关闭页面后不会自动监控/);
+  assert.match(javascript, /任务开关目前只保存偏好/);
+  assert.match(javascript, /市场风险未完整判断/);
+  assert.match(javascript, /计划配置（尚未后台运行）/);
+  assert.match(javascript, /这些开关目前只保存你的计划/);
+  assert.match(javascript, /指数价格事实/);
+  assert.match(javascript, /没有真实批次数据/);
+  assert.match(javascript, /下次手动复盘会使用新的股票集合和缓存键/);
+  assert.doesNotMatch(javascript, /下一项：/);
   assert.doesNotMatch(javascript, /-3\.42%|-9\.54%|-5\.76%/);
   assert.doesNotMatch(javascript, /盘面守望|盘面先锋/);
   assert.doesNotMatch(javascript, /Your site is taking shape|react-loading-skeleton/i);
@@ -36,4 +46,7 @@ test("mobile layouts cover the required 360, 390 and 430 pixel widths", async ()
   assert.match(css, /\.sidebar\s*\{\s*display: none;/s);
   assert.match(css, /\.mobile-nav\s*\{[\s\S]*?display: grid;/);
   assert.match(css, /\.mobile-nav button\s*\{[\s\S]*?min-width: 0;/);
+  assert.match(css, /\.today-brief-grid\s*\{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
+  assert.match(css, /@media \(max-width: 1080px\)[\s\S]*?\.today-brief-grid\s*\{\s*grid-template-columns: 1fr;/);
+  assert.match(css, /@media \(max-width: 390px\)[\s\S]*?\.today-brief-card\s*\{\s*padding: 14px;/);
 });

@@ -106,6 +106,32 @@ async function fetchOne(entry: SinaSectorEntry, fetcher: typeof fetch) {
   return summarizeSinaSectorStocks(entry, await response.json());
 }
 
+export async function fetchSinaIndustryEntryPerformance(
+  entry: SinaSectorEntry,
+  fetcher: typeof fetch = fetch,
+) {
+  if (entry.classification.includes("概念")) return null;
+  return fetchOne(entry, fetcher);
+}
+
+export async function fetchWatchedSinaIndustryPerformance(
+  code: string,
+  name: string,
+  fetcher: typeof fetch = fetch,
+) {
+  if (!code.startsWith("SINA:") || code.startsWith("SINA:gn_")) return null;
+  const node = code.slice("SINA:".length);
+  const entries = await fetchSinaSectorEntries(fetcher);
+  const entry = entries.find(
+    (candidate) =>
+      candidate.node === node &&
+      candidate.name === name &&
+      !candidate.classification.includes("概念"),
+  );
+  if (!entry) return null;
+  return fetchSinaIndustryEntryPerformance(entry, fetcher);
+}
+
 export async function fetchSinaIndustryPerformance(
   fetcher: typeof fetch = fetch,
 ) {
